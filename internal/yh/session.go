@@ -1,0 +1,72 @@
+package yh
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+)
+
+// Session is what the app keeps between runs: the account's token, and
+// what it needs to sign in again.
+type Session struct {
+	Token    string `json:"token"`
+	Email    string `json:"email,omitempty"`
+	Phone    string `json:"phone,omitempty"`
+	DeviceID string `json:"deviceId"`
+	Base     string `json:"base,omitempty"`
+}
+
+// ConfigPath is where the app keeps its session.
+func ConfigPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "mygohu", "session.json"), nil
+}
+
+// LoadSession reads the saved session, if there is one.
+func LoadSession() (*Session, error) {
+	path, err := ConfigPath()
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var s Session
+	if err := json.Unmarshal(data, &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// SaveSession writes the session for the next run.
+func SaveSession(s *Session) error {
+	path, err := ConfigPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+// ClearSession forgets the saved session.
+func ClearSession() error {
+	path, err := ConfigPath()
+	if err != nil {
+		return err
+	}
+	err = os.Remove(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
