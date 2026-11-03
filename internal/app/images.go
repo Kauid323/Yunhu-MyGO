@@ -16,8 +16,8 @@ import (
 // matter: avatars are a few KB each, and a message's picture is up to a
 // megabyte, so a count alone would let a chat of photos take hundreds.
 const (
-	imageKeep   = 400
-	imageBudget = 48 << 20 // bytes of pixels kept
+	imageKeep   = 320
+	imageBudget = 24 << 20 // bytes of pixels kept
 )
 
 // imageCache keeps the pictures of people, groups and messages:
@@ -26,24 +26,33 @@ const (
 type imageCache struct {
 	mu      sync.Mutex
 	bitmaps map[string]imageEntry
-	order   []string // the keys, oldest first
-	total   int      // bytes of pixels kept
+	total   int // bytes of pixels kept
+	// frame counts the frames drawn, and used says which one a picture was
+	// last drawn in: what is drawn now is not taken away to make room for
+	// what is drawn next.
+	frame   uint64
 	loading map[string]bool
 	failed  map[string]bool
-	hc      *http.Client
+	// fetchSem bounds how many pictures are being fetched at once. A panel
+	// that asks for a whole collection of them in one frame would otherwise
+	// have every answer in memory at once, downloaded but not yet decoded.
+	fetchSem chan struct{}
+	hc       *http.Client
 }
 
 // imageEntry is one picture and what its pixels cost.
 type imageEntry struct {
 	bmp  *ui.Bitmap
 	size int
+	used uint64
 }
 
 func newImageCache() *imageCache {
 	return &imageCache{
-		bitmaps: map[string]imageEntry{},
-		loading: map[string]bool{},
-		failed:  map[string]bool{},
+		bitmaps:  map[string]imageEntry{},
+		loading:  map[string]bool{},
+		failed:   map[string]bool{},
+		fetchSem: make(chan struct{}, 8),
 		hc: &http.Client{
 			Timeout: 20 * time.Second,
 			// One picture is asked for at a time per URL, but several
@@ -61,13 +70,20 @@ func (c *imageCache) bytes() int64 {
 	return int64(c.total)
 }
 
+// beginFrame starts a frame: from here until the next one, every picture
+// asked for is one the frame is drawing, and is kept while it is.
+func (c *imageCache) beginFrame() {
+	c.mu.Lock()
+	c.frame++
+	c.mu.Unlock()
+}
+
 // clear drops every picture the cache holds, as the storage page's way of
 // emptying it. What is drawn next fetches what it needs again.
 func (c *imageCache) clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.bitmaps = map[string]imageEntry{}
-	c.order = nil
 	c.total = 0
 	c.failed = map[string]bool{}
 }
@@ -85,6 +101,10 @@ func (c *imageCache) getBox(url string, w, h int, app *App) *ui.Bitmap {
 
 	c.mu.Lock()
 	if e, ok := c.bitmaps[key]; ok {
+		// Asking for it is drawing it: it is the last thing that may be
+		// dropped now.
+		e.used = c.frame
+		c.bitmaps[key] = e
 		c.mu.Unlock()
 		return e.bmp
 	}
@@ -97,7 +117,9 @@ func (c *imageCache) getBox(url string, w, h int, app *App) *ui.Bitmap {
 
 	referer := app.imageReferer()
 	go func() {
+		c.fetchSem <- struct{}{}
 		data, err := c.fetch(resized(url, w, h), url, referer)
+		<-c.fetchSem
 		if err != nil {
 			c.mu.Lock()
 			delete(c.loading, key)
@@ -121,30 +143,45 @@ func (c *imageCache) getBox(url string, w, h int, app *App) *ui.Bitmap {
 	return nil
 }
 
-// keep stores a picture, dropping the oldest while the cache holds more
-// than it should.
+// keep stores a picture, dropping the ones no frame is drawing while the
+// cache holds more than it should.
 func (c *imageCache) keep(key string, bmp *ui.Bitmap) {
 	w, h := ui.ImageSize(bmp)
-	e := imageEntry{bmp: bmp, size: int(w) * int(h) * 4}
+	e := imageEntry{bmp: bmp, size: int(w) * int(h) * 4, used: c.frame}
 	if old, ok := c.bitmaps[key]; ok {
 		c.total -= old.size
-	} else {
-		c.order = append(c.order, key)
 	}
 	c.bitmaps[key] = e
 	c.total += e.size
+	c.trim()
+}
 
-	for len(c.order) > 1 && (c.total > imageBudget || len(c.order) > imageKeep) {
-		old := c.order[0]
-		if old == key { // the one just stored goes last, not away
-			c.order = append(c.order[1:], old)
-			continue
+// trim drops the pictures the frames before this one drew, the least
+// recently drawn first, while the cache holds more than it should.
+//
+// A picture the frame being built asked for is never dropped, whatever the
+// cache costs: dropping it would only have it fetched and decoded again for
+// the next frame, and a frame that draws a whole panel of pictures would
+// spend every frame fetching them all over again — which is what a panel of
+// stickers did, once the pictures in it cost more than the cache may keep.
+func (c *imageCache) trim() {
+	for c.total > imageBudget || len(c.bitmaps) > imageKeep {
+		key, oldest := "", c.frame
+		for k, e := range c.bitmaps {
+			if e.used >= c.frame {
+				continue
+			}
+			if key == "" || e.used < oldest {
+				key, oldest = k, e.used
+			}
 		}
-		c.order = c.order[1:]
-		if gone, ok := c.bitmaps[old]; ok {
-			c.total -= gone.size
-			delete(c.bitmaps, old)
+		if key == "" {
+			// Everything here is on screen: it is kept, and the budget
+			// is what gives way.
+			return
 		}
+		c.total -= c.bitmaps[key].size
+		delete(c.bitmaps, key)
 	}
 }
 

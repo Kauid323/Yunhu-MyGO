@@ -24,18 +24,23 @@ func (a *App) chatHeader(c *ui.Context) {
 		BorderWidth(0, 0, 1, 0).BorderColor(qq.border).Children(func() {
 		// The title is a way into the card of a group: a press on it asks
 		// the group what it says of itself, and shows it beside the name.
+		// It is the whole of the header: what kind of chat it is and what
+		// it is called in the API are not what a header is for.
 		title := ui.Column(c).Grow(1).MinWidth(0).Gap(1).Cursor(ui.CursorPointer)
 		title.Children(func() {
 			name, sub := i18n.T("app.name"), connState(a.live)
 			if conv != nil {
 				name = conv.Title()
 				if conv.ChatType == yh.ChatGroup {
-					name = a.groupTitle(name)
+					name = a.groupTitle(conv.ChatID, name)
 				}
-				sub = i18n.T("chat.headerSub", kindName(conv.ChatType), conv.ChatID)
+				sub = ""
 			}
-			ui.Text(c, name).FontSize(14).FontWeight(600).TextColor(qq.text).SingleLine()
-			ui.Text(c, sub).FontSize(10).TextColor(qq.textFaint).SingleLine()
+			ui.Text(c, name).FontSize(16.5).FontWeight(600).TextColor(qq.text).
+				SingleLine()
+			if sub != "" {
+				ui.Text(c, sub).FontSize(10).TextColor(qq.textFaint).SingleLine()
+			}
 		})
 		if title.Clicked() && conv != nil && conv.ChatType == yh.ChatGroup {
 			a.openGroupCard(title.Bounds())

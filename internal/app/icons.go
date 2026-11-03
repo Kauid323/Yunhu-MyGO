@@ -72,3 +72,21 @@ var (
 	iconSend     = icon(`<path d="M21 3L10.5 13.5M21 3l-6.8 18-3.7-7.5L3 9.8z"/>`)
 	iconLogout   = icon(`<path d="M9 21H5.5A1.5 1.5 0 0 1 4 19.5v-15A1.5 1.5 0 0 1 5.5 3H9"/><path d="M16 16.5l4.5-4.5L16 7.5"/><path d="M20.5 12H9"/>`)
 )
+
+// iconFill parses the same shapes as icon, filled rather than stroked: what
+// a section of the rail becomes once it is the one that is open. The stroke
+// stays, thin, so that the edge of a filled shape is as clean as a drawn
+// one's.
+func iconFill(shapes string) *ui.SVG {
+	return ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">` + shapes + `</svg>`))
+}
+
+// The filled rail: the same sections as above, solid.
+var (
+	iconChatFill     = iconFill(`<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.9 9.9 0 0 1-4-.9L3 21l1.9-4.6A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z"/>`)
+	iconContactsFill = iconFill(`<circle cx="9.5" cy="7.5" r="4"/><path d="M16 20v-1.5a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4V20"/><path d="M21 20v-1.5a4 4 0 0 0-3-3.8" fill="none"/><path d="M16.5 4.2a3.5 3.5 0 0 1 0 6.6" fill="none"/>`)
+	iconStarFill     = iconFill(`<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.2 1 5.9L12 17l-5.2 2.8 1-5.9-4.3-4.2 5.9-.8z"/>`)
+	iconFolderFill   = iconFill(`<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h9A1.5 1.5 0 0 1 21 10v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18z"/>`)
+	iconGridFill     = iconFill(`<rect x="3" y="3" width="7.5" height="7.5" rx="1.8"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.8"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.8"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.8"/>`)
+	iconBellFill     = iconFill(`<path d="M18 8.5a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16s-2-1.5-2-6.5z"/><path d="M13.7 19a2 2 0 0 1-3.4 0" fill="none"/>`)
+)

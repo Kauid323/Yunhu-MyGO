@@ -38,6 +38,7 @@ func (a *App) open(conv yh.Conversation) {
 	a.loading = true
 	a.loadingMore = false
 	a.hasMore = false
+	a.hasNewer, a.loadingNewer, a.newerFrom = false, false, ""
 	a.loadedAt = 1 << 30
 	a.input = ""
 	// A message of the chat that was open is not the message the pointer
@@ -68,8 +69,14 @@ func (a *App) open(conv yh.Conversation) {
 	}
 }
 
-// loadMessages loads the latest messages of a chat.
+// loadMessages loads the latest messages of a chat, or the page a jump is
+// for when one is waiting: a chat opened at something that was found opens
+// at the page that thing is on, and the newest page is never asked for.
 func (a *App) loadMessages(chatID string, chatType int) {
+	if a.jumpID != "" {
+		a.loadAround()
+		return
+	}
 	go func() {
 		msgs, err := a.client.Messages(chatID, chatType, msgFirst)
 		a.update(func() {
@@ -92,6 +99,9 @@ func (a *App) loadMessages(chatID string, chatType int) {
 func (a *App) setMessages(msgs []*yh.Message) {
 	a.msgs = msgs
 	a.hasMore = len(msgs) >= msgFirst
+	// The newest page ends at the newest message: there is nothing below it
+	// to be asked for.
+	a.hasNewer, a.newerFrom = false, ""
 	a.loadedAt = 1 << 30
 	a.unreadFrom = len(msgs) - a.unreadOnOpen
 	if a.unreadFrom < 0 {
@@ -104,6 +114,9 @@ func (a *App) setMessages(msgs []*yh.Message) {
 	// at the first message that was unread, or at the newest one when
 	// there was none.
 	a.jumpTo = -1
+	if a.findJump() {
+		return
+	}
 	if a.unread() {
 		a.jumpTo = a.unreadFrom
 		return
@@ -149,6 +162,7 @@ func (a *App) loadOlder() {
 			}
 			a.prepend(fresh)
 			a.hasMore = len(older) >= msgPage
+			a.findJump()
 		})
 	}()
 }
@@ -250,6 +264,7 @@ func (a *App) send() {
 		pending.Content.QuoteText = quoteTextOf(quoted)
 	}
 	a.msgs = append(a.msgs, pending)
+	a.trimMessages()
 	a.jumpToEnd = true
 
 	go func() {
@@ -290,4 +305,227 @@ func (a *App) send() {
 			})
 		}
 	}()
+}
+
+// jumpToMessage scrolls the history to a message the search found, which
+// the chat may have scrolled past long ago. A message that is here already
+// is scrolled to; one that is not is asked for by the page it is on, which
+// is one request rather than the pages back to it, and the row it lands on
+// is marked for a moment so that it is found by the eye as well as by the
+// list.
+func (a *App) jumpToMessage(id string, seq uint64) {
+	if id == "" {
+		return
+	}
+	a.jumpID, a.jumpSeq = id, seq
+	a.findJump()
+}
+
+// findJump looks for the message a jump was asked for, and says whether it
+// found it: a message that is not in the history is asked for by the page it
+// is on when where it sits is known, and by the pages before the history one
+// at a time when it is not.
+func (a *App) findJump() bool {
+	if a.jumpID == "" {
+		return false
+	}
+	for i, m := range a.msgs {
+		if m.MsgID != a.jumpID {
+			continue
+		}
+		a.jumpTo = i
+		a.flashID, a.flashAt = a.jumpID, time.Now()
+		a.jumpID, a.jumpSeq = "", 0
+		return true
+	}
+	if a.loadingAround {
+		return false
+	}
+	if a.jumpSeq > 0 {
+		a.loadAround()
+		return false
+	}
+	if a.hasMore && !a.loadingMore {
+		a.loadOlder()
+	}
+	return false
+}
+
+// loadAround asks for the page a message is on, and shows it as the history:
+// a result from months ago is one request away rather than a page at a time.
+// What is above the page is asked for as the reader goes back through it,
+// and what is below it as they come forward, so that the chat is whole again
+// in both directions.
+func (a *App) loadAround() {
+	id, seq := a.jumpID, a.jumpSeq
+	chatID, chatType := a.current, a.currentType
+	if id == "" || chatID == "" || a.loadingAround {
+		return
+	}
+	a.loadingAround = true
+	a.loading = true
+	go func() {
+		msgs, err := a.client.MessagesAround(chatID, chatType, msgPage, id, seq)
+		a.update(func() {
+			a.loadingAround = false
+			if a.current != chatID {
+				return
+			}
+			a.loading = false
+			if err != nil {
+				a.note = errorLine(err)
+				// Where the message sits was not taken, so it is looked
+				// for the long way, one page at a time; a chat with no
+				// history to look through opens at its end instead.
+				a.jumpSeq = 0
+				if len(a.msgs) == 0 {
+					a.jumpID = ""
+					a.loadMessages(chatID, chatType)
+					return
+				}
+				a.findJump()
+				return
+			}
+			a.setAround(msgs, id)
+		})
+	}()
+}
+
+// setAround shows the page a jump landed on as the history, scrolled to the
+// message itself.
+func (a *App) setAround(msgs []*yh.Message, id string) {
+	a.msgs = msgs
+	// A page that came back full has more after it; one that did not has
+	// reached the newest message.
+	a.hasMore = len(msgs) > 0
+	a.hasNewer = len(msgs) > msgPage
+	a.loadedAt = 1 << 30
+	a.moreAt, a.newerFrom = time.Time{}, ""
+	a.jumpToEnd = false
+	a.jumpTo = -1
+	for i, m := range msgs {
+		if m.MsgID == id {
+			a.jumpTo = i
+			a.flashID, a.flashAt = id, time.Now()
+			break
+		}
+	}
+	// Nothing here is unread in the way the button over the list counts:
+	// the reader came to this page on purpose, and what is below it is
+	// history they chose to leave.
+	a.unreadFrom = len(msgs)
+	a.readFrom = len(msgs)
+	a.unreadOnOpen = 0
+	a.jumpID, a.jumpSeq = "", 0
+	if a.jumpTo < 0 {
+		// The page did not hold what was asked for: the chat opens at its
+		// end, as it does without a jump.
+		a.loadMessages(a.current, a.currentType)
+	}
+}
+
+// loadNewer puts the messages after the last one on screen below it: the
+// history was opened in the middle of itself, and what follows the page is
+// what makes it whole again as the reader comes forward.
+func (a *App) loadNewer() {
+	if a.loadingNewer || !a.hasNewer || a.current == "" || len(a.msgs) == 0 {
+		return
+	}
+	chatID, chatType := a.current, a.currentType
+	last := a.msgs[len(a.msgs)-1]
+	a.loadingNewer, a.newerFrom = true, last.MsgID
+	go func() {
+		after, err := a.client.MessagesAfter(chatID, chatType, last.MsgSeq)
+		a.update(func() {
+			a.loadingNewer = false
+			if a.current != chatID {
+				return
+			}
+			if err != nil {
+				a.note = errorLine(err)
+				return
+			}
+			fresh := a.withoutKnown(after)
+			if len(fresh) == 0 {
+				// The page held nothing new: asking again would ask for
+				// the same messages for ever.
+				a.hasNewer = false
+				return
+			}
+			a.msgs = append(a.msgs, fresh...)
+			a.hasNewer = len(after) >= msgAfter
+			a.trimMessages()
+		})
+	}()
+}
+
+// wantNewer reports whether the history should grow downwards: the reader
+// has come to the last fifth of what is here, and there is more of it below
+// because the chat was opened in the middle. The last message is what says
+// whether asking would add anything, so a list resting at its end asks once
+// rather than on every frame.
+func (a *App) wantNewer(last, rows int) bool {
+	if !a.hasNewer || a.loadingNewer || a.current == "" || len(a.msgs) == 0 {
+		return false
+	}
+	if rows == 0 || last < 0 || last < rows-rows/5 {
+		return false
+	}
+	return a.msgs[len(a.msgs)-1].MsgID != a.newerFrom
+}
+
+// flash reports how strongly a message is marked for having been jumped to,
+// which fades over the second after it: a row that was found is a row that
+// has to be seen.
+func (a *App) flash(id string) float32 {
+	if id == "" || id != a.flashID {
+		return 0
+	}
+	k := 1 - float32(time.Since(a.flashAt))/float32(1200*time.Millisecond)
+	if k <= 0 {
+		a.flashID = ""
+		return 0
+	}
+	return k
+}
+
+// openConvByID opens the chat with an id, whether or not it is in the list:
+// a search finds messages of the chat that is open, which the list has.
+func (a *App) openConvByID(id string, chatType int) {
+	for _, conv := range a.convs {
+		if conv.ChatID == id {
+			a.open(conv)
+			return
+		}
+	}
+	a.open(yh.Conversation{ChatID: id, ChatType: chatType})
+}
+
+// msgKeep is how many messages a chat keeps in memory. A chat that has been
+// read for hours would otherwise hold every message it ever loaded, and the
+// pictures in them, which is the largest thing this client holds. What is
+// dropped is the oldest: the pages before it are still on the server, and
+// scrolling up asks for them again.
+const msgKeep = 900
+
+// trimMessages drops the oldest messages once a chat holds more than it
+// keeps, and moves what is counted in rows along with them.
+func (a *App) trimMessages() {
+	if len(a.msgs) <= msgKeep {
+		return
+	}
+	drop := len(a.msgs) - msgKeep
+	kept := make([]*yh.Message, msgKeep)
+	copy(kept, a.msgs[drop:])
+	a.msgs = kept
+
+	a.unreadFrom = max(a.unreadFrom-drop, 0)
+	a.readFrom = max(a.readFrom-drop, 0)
+	a.loadedAt = max(a.loadedAt-drop, 0)
+	if a.jumpTo >= 0 {
+		a.jumpTo = max(a.jumpTo-drop, 0)
+	}
+	// What was dropped is older than what is kept, so the pages before it
+	// are still there to be asked for.
+	a.hasMore = true
 }

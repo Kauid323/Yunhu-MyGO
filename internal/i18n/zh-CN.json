@@ -82,13 +82,15 @@
   "msg.quote": "引用",
   "msg.delete": "删除",
   "msg.noChat": "没有可转发的会话",
+  "conv.said": "{who}:{what}",
+  "chat.groupTitle": "{name}（{n}）",
+  "group.members": "{id}（{n}人）",
   "group.remark": "备注",
   "group.setRemark": "设置群聊备注",
   "group.intro": "群介绍",
   "group.category": "群分类",
   "group.share": "分享",
   "group.message": "发消息",
-  "group.people": "{n}人",
   "conv.newGroup": "创建群聊",
   "conv.addFriend": "加好友/群",
   "conv.newBot": "创建机器人",
@@ -99,7 +101,6 @@
   "ask.ok": "确定",
   "ask.cancel": "取消",
   "chat.connection": "连接",
-  "chat.headerSub": "{kind} · {id}",
   "chat.recalled": "消息已撤回",
   "chat.edited": "已编辑",
   "chat.pending": "发送中…",
@@ -159,7 +160,7 @@
 
   "picture.title": "图片预览",
 
-  "notice.more": "{n}条新消息：{text}",
+  "notice.more": "{n}条新消息: {text}",
   "notice.quiet": "你收到一条新消息",
 
   "menu.favorites": "收藏",

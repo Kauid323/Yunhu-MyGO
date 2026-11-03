@@ -62,13 +62,17 @@ func (a *App) messages(c *ui.Context) {
 		}
 	})
 
-	// Reading back through the history loads more of it, and going down
-	// through it reads it.
+	// Reading back through the history loads more of it, going down through
+	// it reads it, and coming forward through a history that was opened in
+	// the middle of itself loads what follows it.
 	first, last := a.msgList.Visible()
 	a.markRead(first, last)
 	if a.wantMore(first, last, rows) {
 		a.loadedAt, a.moreAt = first, time.Now()
 		a.loadOlder()
+	}
+	if a.wantNewer(last, rows) {
+		a.loadNewer()
 	}
 }
 
@@ -134,6 +138,7 @@ func (a *App) messageRow(c *ui.Context, m *yh.Message, i int) {
 			a.bubble(c, m)
 		})
 		a.rightClickMessage(m, row)
+		a.flashRow(c, m, row)
 		return
 	}
 
@@ -166,6 +171,7 @@ func (a *App) messageRow(c *ui.Context, m *yh.Message, i int) {
 	})
 	a.hoverStamp(c, m, col)
 	a.rightClickMessage(m, row)
+	a.flashRow(c, m, row)
 }
 
 // messageAvatar is the face of whoever said a message, which opens the card of
@@ -418,4 +424,16 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// flashRow marks the row a jump landed on: the list scrolls to what was
+// found, and the tint says which row it stopped at, fading over the second
+// after it.
+func (a *App) flashRow(c *ui.Context, m *yh.Message, row ui.Element) {
+	k := a.flash(m.MsgID)
+	if k <= 0 {
+		return
+	}
+	c.After(16 * time.Millisecond)
+	row.Background(ui.RGBA(45, 119, 229, 0.16*k)).Radius(8)
 }

@@ -31,7 +31,10 @@ func (a *App) composer(c *ui.Context) {
 			for _, ic := range []*ui.SVG{iconScissors, iconFolder, iconImage, iconMic, iconAt} {
 				a.toolIcon(c, ic)
 			}
-			// The clock opens the chat's history: what was said in it, searched.
+			// The clock opens the chat's history: what was said in it,
+			// searched. It sits at the far end of the row, apart from the
+			// tools that put something into the message.
+			ui.Spacer(c)
 			a.toolAction(c, iconHistory, false, a.OpenSearch)
 		})
 		a.stickersPanel(c, tools)

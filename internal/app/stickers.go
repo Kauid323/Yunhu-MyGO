@@ -18,6 +18,12 @@ const (
 	stickerCell   = 44
 	stickerPerRow = 6
 	stickerRows   = 5
+	// stickerCellPx is how many pixels a sticker of the panel is asked of
+	// the host: twice the DIPs it is drawn at. A sticker of a message is
+	// asked at stickerPx, which is five times the pixels of this one — the
+	// panel used to ask for those, and a collection of a few hundred cost
+	// more than the picture cache may keep.
+	stickerCellPx = stickerCell * 2
 )
 
 // loadStickers asks for the account's stickers, once per run: they change when
@@ -65,8 +71,12 @@ func (a *App) stickersPanel(c *ui.Context, anchor ui.Element) {
 }
 
 // stickerGrid is the stickers, a row at a time, as many as the account has:
-// the panel is as tall as five rows of them and scrolls to the rest, which
-// are only fetched as they are shown.
+// the panel is as tall as five rows of them and scrolls to the rest.
+//
+// The rows are a list rather than a column in a scroll box, so that only the
+// ones in view are built: a collection of hundreds would otherwise ask for
+// every picture in it on every frame, and the pictures of a few hundred
+// stickers cost more than the cache may keep.
 func (a *App) stickerGrid(c *ui.Context) {
 	switch {
 	case a.stickerGo:
@@ -77,18 +87,23 @@ func (a *App) stickerGrid(c *ui.Context) {
 			TextColor(qq.textMuted).Padding(8)
 		return
 	}
-	ui.Scroll(c).MaxHeight(stickerCell * stickerRows).Children(func() {
-		ui.Column(c).Gap(2).Children(func() {
-			for i := 0; i < len(a.stickers); i += stickerPerRow {
-				row := a.stickers[i:min(i+stickerPerRow, len(a.stickers))]
-				ui.Row(c).Gap(2).Children(func() {
-					for _, ex := range row {
-						a.stickerButton(c, ex)
-					}
-				})
+	rows := (len(a.stickers) + stickerPerRow - 1) / stickerPerRow
+	// The panel is as tall as its rows, up to five of them. The height is
+	// given rather than left to the content: a list that is only bounded by
+	// a maximum has no view to be the whole of, and builds every row it
+	// has — which asks for every sticker in the collection, not the ones in
+	// view.
+	shown := min(rows, stickerRows)
+	ui.List(c, &a.stickerList, rows, func(i int) {
+		// The row says how tall it is rather than being measured: a row of
+		// pictures is measured before its pictures are here, and a row
+		// measured short lets the next one up over it.
+		ui.Row(c).Height(stickerCell).Gap(2).Children(func() {
+			for j := i * stickerPerRow; j < min((i+1)*stickerPerRow, len(a.stickers)); j++ {
+				a.stickerButton(c, a.stickers[j])
 			}
 		})
-	})
+	}).Height(float32(shown*stickerCell) + float32(shown-1)*2).Padding(0).Gap(2)
 }
 
 // stickerButton is one sticker of the panel: its picture, and a press that
@@ -100,7 +115,7 @@ func (a *App) stickerButton(c *ui.Context, ex yh.Expression) {
 		box.Background(qq.menuHover)
 	}
 	box.Children(func() {
-		if bmp := a.images.getBox(stickerURLFor(ex.URL), stickerPx, stickerPx, a); bmp != nil {
+		if bmp := a.images.getBox(stickerURLFor(ex.URL), stickerCellPx, stickerCellPx, a); bmp != nil {
 			w, h := ui.ImageSize(bmp)
 			k := min(stickerCell/w, stickerCell/h)
 			ui.Image(c, bmp).Width(w * k).Height(h * k)

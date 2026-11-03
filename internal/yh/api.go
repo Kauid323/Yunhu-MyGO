@@ -272,6 +272,51 @@ func (c *Client) messages(chatID string, chatType, count int, before string) ([]
 	return oldestFirst(msgs), nil
 }
 
+// MessagesAround returns the page a message is on, the message itself among
+// them: the route lists from a message and its sequence rather than from
+// the newest one, so a history can be opened where something was found
+// instead of being paged back to it a page at a time.
+//
+// A sequence the route does not know is said as zero, which it reads as
+// the message id alone being enough.
+func (c *Client) MessagesAround(chatID string, chatType, count int, msgID string, seq uint64) ([]*Message, error) {
+	var body []byte
+	body = pbUint(body, 3, seq)
+	body = pbUint(body, 4, uint64(chatType))
+	body = pbString(body, 5, chatID)
+	body = pbUint(body, 6, 0)
+	body = pbUint(body, 7, uint64(count))
+	body = pbString(body, 8, msgID)
+	data, err := c.do("POST", "/v1/msg/list-message-by-mid-seq", body, true)
+	if err != nil {
+		return nil, err
+	}
+	msgs, status := decodeMessages(data)
+	if err := status.Err(); err != nil {
+		return nil, err
+	}
+	return oldestFirst(msgs), nil
+}
+
+// MessagesAfter returns the messages the server lists after a sequence: the
+// page below a history that was opened in the middle of itself. The route
+// takes no count of its own, so the page is as long as it is.
+func (c *Client) MessagesAfter(chatID string, chatType int, seq uint64) ([]*Message, error) {
+	var body []byte
+	body = pbUint(body, 3, seq)
+	body = pbUint(body, 4, uint64(chatType))
+	body = pbString(body, 5, chatID)
+	data, err := c.do("POST", "/v1/msg/list-message-by-seq", body, true)
+	if err != nil {
+		return nil, err
+	}
+	msgs, status := decodeMessages(data)
+	if err := status.Err(); err != nil {
+		return nil, err
+	}
+	return oldestFirst(msgs), nil
+}
+
 // oldestFirst turns the server's newest-first page into the order a chat
 // reads: oldest at the top.
 func oldestFirst(msgs []*Message) []*Message {

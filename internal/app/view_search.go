@@ -17,6 +17,8 @@ type searchItem struct {
 	head bool
 	day  time.Time
 	hits []yh.SearchHit
+	// more is the row that asks for the page before the ones shown.
+	more bool
 }
 
 // searchView is the window the chat's history is searched in: the field,
@@ -98,13 +100,22 @@ func (a *App) searchLoadIfDue(c *ui.Context, s *searchWin) {
 }
 
 // searchTabs is the row of what the search can be narrowed to, and the
-// button that opens the filters.
+// button that opens the filters. The line under the tab that is taken is
+// drawn once for the whole row rather than under each tab, so that it can
+// travel from one to the other instead of jumping.
 func (a *App) searchTabs(c *ui.Context, s *searchWin) {
-	ui.Row(c).Height(34).Padding(0, 14).AlignItems(ui.Center).Gap(22).Children(func() {
+	row := ui.Row(c).Height(38).Margin(4, 0, 0, 0).Padding(0, 14).
+		AlignItems(ui.Center).Gap(22)
+	var taken ui.Element
+	found := false
+	row.Children(func() {
 		keys := [...]string{"search.tab.all", "search.tab.media", "search.tab.sticker",
 			"search.tab.file", "search.tab.link"}
 		for i, key := range keys {
-			a.searchTab(c, s, i, key)
+			el := a.searchTab(c, s, i, key)
+			if i == s.tab {
+				taken, found = el, true
+			}
 		}
 		ui.Spacer(c)
 		on := a.searchFiltered()
@@ -125,29 +136,71 @@ func (a *App) searchTabs(c *ui.Context, s *searchWin) {
 			s.filter = !s.filter
 		}
 	})
+	if found {
+		a.searchTabLine(c, s, row, taken)
+	}
 }
 
-// searchTab is one of the tabs: the word, and the line under the one that
-// is taken.
-func (a *App) searchTab(c *ui.Context, s *searchWin, tab int, key string) {
+// searchTab is one of the tabs: the word alone, as the line under it is the
+// row's. It answers with what it was drawn as, so that the line knows where
+// to go.
+func (a *App) searchTab(c *ui.Context, s *searchWin, tab int, key string) ui.Element {
 	on := s.tab == tab
-	box := ui.Column(c).Gap(6).AlignItems(ui.Center).Cursor(ui.CursorPointer)
+	box := ui.Box(c).Height(38).Center().Cursor(ui.CursorPointer)
 	box.Children(func() {
-		ui.Text(c, i18n.T(key)).FontSize(12.5).
-			TextColor(map[bool]ui.Color{true: qq.accent, false: qq.textMuted}[on])
-		line := ui.Box(c).Height(2).Radius(1).Width(18)
+		col := qq.textMuted
 		if on {
-			line.Background(qq.accent)
+			col = qq.accent
 		}
+		ui.Text(c, i18n.T(key)).FontSize(12.5).TextColor(col)
 	})
 	if box.Clicked() && !on {
 		s.tab = tab
 		s.list = ui.ListState{}
 		a.searchLoad()
 	}
+	return box
 }
 
-// searchResults is what the search found, a day at a time.
+// searchTabLine is the line under the tab that is taken. It slides from
+// where it was to where the tab is now over a moment: a line that jumped
+// would read as a different line rather than as the same one moved.
+//
+// It is laid out as a row of three: the gap before it, the line itself, and
+// what is left. Placing it by its own position rather than by an offset is
+// what keeps it under the tabs: an absolute box inside a row is measured
+// from a place of its own, and the line came out above the words.
+func (a *App) searchTabLine(c *ui.Context, s *searchWin, row, tab ui.Element) {
+	b, r := tab.Bounds(), row.Bounds()
+	toX, toW := b.X-r.X, b.W
+	if s.tabW == 0 {
+		s.tabX, s.tabW = toX, toW
+	}
+	if s.tabX != toX || s.tabW != toW {
+		if s.tabAt.IsZero() {
+			s.tabFromX, s.tabFromW, s.tabAt = s.tabX, s.tabW, c.Now()
+		}
+		k := float32(c.Now().Sub(s.tabAt)) / float32(160*time.Millisecond)
+		if k >= 1 {
+			s.tabX, s.tabW, s.tabAt = toX, toW, time.Time{}
+		} else {
+			e := ui.EaseOut(k)
+			s.tabX = s.tabFromX + (toX-s.tabFromX)*e
+			s.tabW = s.tabFromW + (toW-s.tabFromW)*e
+			c.After(16 * time.Millisecond)
+		}
+	}
+	ui.Row(c).Height(2).Children(func() {
+		ui.Box(c).Width(max(s.tabX, 0))
+		ui.Box(c).Width(s.tabW).Height(2).Radius(1).Background(qq.accent)
+		ui.Spacer(c)
+	})
+}
+
+// searchResults is what the search found, a day at a time. The day at the
+// top of it is pinned under the tabs while the rest scrolls: a list of
+// messages from months ago says nothing about which month is on screen
+// unless the day is held there.
 func (a *App) searchResults(c *ui.Context, s *searchWin) {
 	items := a.searchItems()
 	switch {
@@ -165,14 +218,88 @@ func (a *App) searchResults(c *ui.Context, s *searchWin) {
 		a.searchEmpty(c, s)
 		return
 	}
-	ui.List(c, &s.list, len(items), func(i int) {
-		it := items[i]
-		if it.head {
-			a.searchDay(c, it.day)
+	area := ui.Box(c).Grow(1).FillHeight()
+	area.Children(func() {
+		ui.List(c, &s.list, len(items), func(i int) {
+			it := items[i]
+			switch {
+			case it.head:
+				a.searchDay(c, it.day)
+			case it.more:
+				a.searchMore(c, s)
+			default:
+				a.searchRow(c, s, it.hits)
+			}
+		}).Fill().Padding(0, 16).Gap(0)
+		a.searchSticky(c, s, items)
+	})
+}
+
+// searchSticky is the day held under the tabs: the day of the first row on
+// screen. One day hands over to the next as it is scrolled to, the one
+// going up and out as the other comes up into its place.
+func (a *App) searchSticky(c *ui.Context, s *searchWin, items []searchItem) {
+	first, _ := s.list.Visible()
+	if first < 0 || first >= len(items) {
+		return
+	}
+	it := items[first]
+	day := it.day
+	if !it.head {
+		if len(it.hits) == 0 {
 			return
 		}
-		a.searchRow(c, s, it.hits)
-	}).Grow(1).FillHeight().Padding(0, 16).Gap(0)
+		day = startOfDay(it.hits[0].Time)
+	}
+	if day.IsZero() {
+		return
+	}
+	if !s.sticky.IsZero() && !sameDay(s.sticky, day) {
+		s.stickyFrom, s.stickyAt = s.sticky, c.Now()
+	}
+	s.sticky = day
+
+	k := float32(1)
+	if !s.stickyAt.IsZero() {
+		k = float32(c.Now().Sub(s.stickyAt)) / float32(170*time.Millisecond)
+		if k >= 1 {
+			k, s.stickyAt = 1, time.Time{}
+		} else {
+			c.After(16 * time.Millisecond)
+		}
+	}
+	// The day is centred in its band, in the same band the days of the list
+	// open with and at the same left: one handing over to the other has to
+	// land where the other was, or the handover reads as a jump.
+	box := ui.Box(c).Absolute().Left(0).Top(0).Right(0).Height(searchDayH).
+		Background(qq.chatBg)
+	box.Children(func() {
+		if k < 1 && !s.stickyFrom.IsZero() {
+			a.searchStickyDay(c, s.stickyFrom, 1-k, -10*k)
+		}
+		a.searchStickyDay(c, day, k, 10*(1-k))
+	})
+}
+
+// searchStickyDay is one of the two days the band hands over between: the
+// date alone, centred in the band and set where the list's days are set,
+// faded and moved by as much as the handover has come.
+func (a *App) searchStickyDay(c *ui.Context, day time.Time, alpha, dy float32) {
+	ui.Row(c).Absolute().Left(16).Top(0).Right(0).Height(searchDayH).
+		AlignItems(ui.Center).Opacity(alpha).Translate(0, dy).Children(func() {
+		ui.Text(c, day.Format("2006/01/02")).FontSize(12.5).TextColor(qq.textMuted)
+	})
+}
+
+// searchMore is the row that asks for the page before the ones shown. It is
+// drawn only while it is in view, so being drawn is the asking.
+func (a *App) searchMore(c *ui.Context, s *searchWin) {
+	if !s.loadingMore {
+		a.searchLoadMore()
+	}
+	ui.Box(c).Height(44).Center().Children(func() {
+		ui.Spinner(c)
+	})
 }
 
 // searchEmpty is the window with nothing in it: a mark and the word for
@@ -193,19 +320,30 @@ func (a *App) searchEmpty(c *ui.Context, s *searchWin) {
 	})
 }
 
-// searchDay is the line that opens a day of the results.
+// searchDay opens a day of the results: the date alone, centred in the band
+// it opens rather than across it, and at the left of the results where the
+// messages under it begin. A line under it would be a second line across
+// the results, and the day is already held under the tabs while they move.
 func (a *App) searchDay(c *ui.Context, day time.Time) {
-	ui.Column(c).Gap(7).Padding(0, 0, 0, 0).Children(func() {
-		ui.Text(c, day.Format("2006/01/02")).FontSize(12.5).TextColor(qq.textMuted).
-			Margin(12, 0, 0, 0)
-		ui.Box(c).Height(1).Background(qq.border)
+	ui.Row(c).Height(searchDayH).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, day.Format("2006/01/02")).FontSize(12.5).TextColor(qq.textMuted)
 	})
 }
 
 // searchRow is one message the search found, or the pictures of one day
 // beside each other.
 func (a *App) searchRow(c *ui.Context, s *searchWin, hits []yh.SearchHit) {
-	ui.Row(c).Gap(10).Padding(12, 0, 14, 0).AlignItems(ui.Start).Children(func() {
+	row := ui.Row(c).Gap(10).Padding(12, 0, 14, 0).AlignItems(ui.Start).
+		Cursor(ui.CursorPointer)
+	if row.Hovered() {
+		row.Background(qq.listHover)
+	}
+	// A press goes to the message itself: the history is scrolled to it,
+	// loading the pages before it until it is in them.
+	if row.Clicked() {
+		a.searchJump(s, hits[0])
+	}
+	row.Children(func() {
 		a.avatar(c, hits[0].AvatarURL, hits[0].Name, 40)
 		ui.Column(c).Grow(1).MinWidth(0).Gap(5).Children(func() {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -289,15 +427,28 @@ func (a *App) searchItems() []searchItem {
 		}
 		out = append(out, searchItem{hits: row})
 	}
+	if a.search != nil && a.search.more {
+		out = append(out, searchItem{more: true})
+	}
 	return out
 }
 
 // searchFilterPanel is the panel beside the results: the day the search is
 // narrowed to, and who said it.
+// filterArrives is how the panel beside the results comes and goes: it
+// slides in from the edge it is against rather than being there all at
+// once, which reads as the results making room for it.
+var filterArrives = ui.ElementTransition{
+	Duration: 180 * time.Millisecond,
+	Ease:     ui.EaseOut,
+	Enter:    &ui.Motion{X: 18, Opacity: 0},
+	Exit:     &ui.Motion{X: 14, Opacity: 0},
+}
+
 func (a *App) searchFilterPanel(c *ui.Context, s *searchWin) {
 	ui.Column(c).Width(searchFilterW).FillHeight().Background(qq.panelBg).
 		BorderWidth(0, 0, 0, 1).BorderColor(qq.border).
-		Padding(14, 16, 16, 16).Children(func() {
+		Padding(14, 16, 16, 16).Transition(filterArrives).Children(func() {
 		ui.Row(c).Height(28).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, i18n.T("search.filterTitle")).FontSize(13).
 				TextColor(qq.text).Grow(1)

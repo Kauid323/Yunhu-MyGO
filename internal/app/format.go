@@ -263,3 +263,23 @@ func shortCount(n int) string {
 	}
 	return i18n.Num(n)
 }
+
+// said is a message as the list of chats and a notice write it: who said
+// it and what, for a chat of several, and what alone for a chat with one
+// person, where the name would only say what the row already says.
+//
+// The list is written here rather than taken from the server: what a chat
+// pushed is a message, not a line of a list, and a line has to say who.
+func said(m *yh.Message, chatType int, me string) string {
+	if m == nil {
+		return ""
+	}
+	text := preview(m.ContentType, m.Content)
+	if chatType != yh.ChatGroup || m.Sender.ChatID == me || m.Sender.Name == "" {
+		return text
+	}
+	if text == "" {
+		return m.Sender.Name
+	}
+	return i18n.T("conv.said", m.Sender.Name, text)
+}

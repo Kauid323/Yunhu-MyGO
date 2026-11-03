@@ -72,7 +72,7 @@ func showDatePicker(c *ui.Context, anchor ui.Element, p *datePicker, onPick func
 			Width(pickerW).Padding(pickerPad).Radius(10).
 			Background(ui.Hex("#2b2b2b")).Border(1, ui.Hex("#3a3a3a")).
 			Shadow(0, 10, 26, 0, ui.RGBA(0, 0, 0, 0.45)).
-			Transition(menuArrives)
+			TransformOrigin(0, 0).Transition(menuArrives)
 		panel.Children(func() {
 			// The page fades in when it changes: a calendar that swapped
 			// its grid at once would look like the same one with other

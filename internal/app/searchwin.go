@@ -25,6 +25,10 @@ const (
 const (
 	searchW, searchH = 660, 720
 	searchFilterW    = 300
+	// searchDayH is the band a day of the results opens with, which the
+	// day held under the tabs is the same height as: the two are one band
+	// handing over to the other, so they have to measure the same.
+	searchDayH = 34
 )
 
 // searchWin is the window a chat's history is searched in: what is being
@@ -50,10 +54,26 @@ type searchWin struct {
 
 	hits []yh.SearchHit
 	err  line
+	// more says the route may have older messages than the ones here,
+	// and loadingMore that a page of them is being asked for.
+	more        bool
+	loadingMore bool
 	// list is the state of the results, and senderList the state of
 	// the list of senders: a state shown by two lists is a panic.
 	list       ui.ListState
 	senderList ui.ListState
+	// The line under the tab that is taken slides from the one it was
+	// under to the one it is under now: tabX and tabW are where it is,
+	// and tabFromX and tabFromW where it comes from, as of tabAt.
+	tabX, tabW         float32
+	tabFromX, tabFromW float32
+	tabAt              time.Time
+	// The day at the top of the results is pinned under the tabs: sticky
+	// is the day shown, stickyFrom the one it took over from, and
+	// stickyAt when it changed, so that one hands over to the other.
+	sticky     time.Time
+	stickyFrom time.Time
+	stickyAt   time.Time
 
 	// The filters: a span of days, and the senders that were picked.
 	from, to   time.Time
@@ -143,7 +163,7 @@ func (a *App) searchLoad() {
 	}
 	go func() {
 		hits, err := a.client.SearchChat(chatID, chatType, word,
-			searchTabKey(tab), before, 60)
+			searchTabKey(tab), before, searchPage)
 		a.update(func() {
 			s.loading = false
 			if err != nil {
@@ -153,6 +173,7 @@ func (a *App) searchLoad() {
 			}
 			s.err = line{}
 			s.hits = hits
+			s.more = len(hits) >= searchPage
 			s.list.ScrollTo(0, ui.Start)
 		})
 	}()
@@ -253,4 +274,74 @@ func (a *App) OpenFirstSearch() {
 	}
 	time.Sleep(1200 * time.Millisecond)
 	a.update(func() { a.OpenSearch() })
+}
+
+// searchPage is how many messages a page of the search holds, and
+// searchKeep how many the window holds at once: a search that is scrolled
+// for long enough would otherwise keep the whole history of a chat in a
+// window that is not even looked at.
+const (
+	searchPage = 60
+	searchKeep = 600
+)
+
+// searchLoadMore asks for the page before the ones the window shows: the
+// route answers with what came before the time it is given, so the oldest
+// message here is where the next page starts.
+func (a *App) searchLoadMore() {
+	s := a.search
+	if s == nil || s.loading || s.loadingMore || !s.more || len(s.hits) == 0 {
+		return
+	}
+	last := s.hits[len(s.hits)-1]
+	chatID, chatType, word, tab := s.chatID, s.chatType, s.word, s.tab
+	s.loadingMore = true
+	go func() {
+		hits, err := a.client.SearchChat(chatID, chatType, word,
+			searchTabKey(tab), last.Time, searchPage)
+		a.update(func() {
+			s.loadingMore = false
+			if err != nil {
+				s.err = errorLine(err)
+				return
+			}
+			// The page starts at the message the last one ended on, which
+			// is the same message again: it is dropped.
+			seen := make(map[string]bool, len(s.hits))
+			for _, h := range s.hits {
+				seen[h.ID] = true
+			}
+			added := 0
+			for _, h := range hits {
+				if seen[h.ID] {
+					continue
+				}
+				seen[h.ID] = true
+				s.hits = append(s.hits, h)
+				added++
+			}
+			// A page that adds nothing is the end of it, whatever its
+			// length says.
+			s.more = added > 0 && len(hits) >= searchPage
+		})
+	}()
+}
+
+// searchJump goes to the message a result is: the chat it was said in is
+// opened at that message, the history is scrolled to it, and the window the
+// search is in steps back so that what it found is seen.
+//
+// Where the message sits in the chat is known from the result, so the page it
+// is on is asked for as the chat opens: a result from months ago is one
+// request away rather than the pages back to it.
+func (a *App) searchJump(s *searchWin, h yh.SearchHit) {
+	a.jumpID, a.jumpSeq = h.ID, uint64(h.Sequence)
+	a.openConvByID(s.chatID, s.chatType)
+	// A chat that was already open loaded nothing for the jump, and the
+	// message is looked for in what is here: found, it is only scrolled to.
+	a.jumpToMessage(h.ID, uint64(h.Sequence))
+	if a.win != nil && !a.win.IsDestroyed() {
+		a.win.Show()
+		a.win.Focus()
+	}
 }

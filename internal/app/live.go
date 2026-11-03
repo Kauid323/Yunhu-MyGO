@@ -31,21 +31,26 @@ func (a *App) onEvent(ev yh.Event) {
 			if m == nil || m.MsgID == "" {
 				return
 			}
-			if m.ChatID == a.current && a.me != nil && m.Sender.ChatID != a.me.ID {
-				a.addMessage(m)
-				go func() { _ = a.client.MarkRead(m.ChatID) }()
-				// Looking at the chat is reading it, so nothing is told
-				// of what is already on screen — unless the window is
-				// behind another one or down in the taskbar, which is
-				// when a desktop notification earns its keep.
-				if a.away() {
-					a.tellArrival(m)
-				}
+			if a.me != nil && m.Sender.ChatID == a.me.ID {
 				return
 			}
-			if a.me != nil && m.Sender.ChatID != a.me.ID {
-				a.bump(m)
-				a.tellArrival(m)
+			// Looking at the chat is reading it, so nothing is told of
+			// what is already on screen — unless the window is behind
+			// another one or down in the taskbar, which is when a
+			// desktop notification earns its keep. The list is told
+			// either way: what was said moves the chat and changes the
+			// line it shows, whether or not the chat is the one on
+			// screen.
+			here := m.ChatID == a.current
+			if here {
+				a.addMessage(m)
+				go func() { _ = a.client.MarkRead(m.ChatID) }()
+			}
+			if a.me != nil {
+				a.bump(m, !here)
+				if !here || a.away() {
+					a.tellArrival(m)
+				}
 			}
 		case "edit_message":
 			if m := ev.Message; m != nil {
@@ -101,6 +106,7 @@ func (a *App) addMessage(m *yh.Message) {
 	}
 	read := a.msgList.AtEnd() && !a.unread()
 	a.msgs = append(a.msgs, m)
+	a.trimMessages()
 	if read {
 		a.unreadFrom = len(a.msgs)
 		a.readFrom = len(a.msgs)

@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -40,6 +41,18 @@ func main() {
 			}
 		}()
 	}
+	// The heap is given back to the system once the window has settled, and
+	// every few minutes after: Go keeps what it has taken for the next burst,
+	// and a chat that is read for hours would sit on a heap it no longer
+	// uses. It is what the task manager shows as the memory of the client.
+	go func() {
+		time.Sleep(25 * time.Second)
+		debug.FreeOSMemory()
+		for {
+			time.Sleep(5 * time.Minute)
+			debug.FreeOSMemory()
+		}
+	}()
 	dbg := func() string { return "" }
 	if os.Getenv("MYGOHU_MEM") != "" {
 		dbg = func() string { return a.DebugStats() }

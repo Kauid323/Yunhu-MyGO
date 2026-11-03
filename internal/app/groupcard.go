@@ -2,6 +2,7 @@ package app
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -74,7 +75,8 @@ func (a *App) groupCardPanel(c *ui.Context) {
 	}
 	panel := ui.Box(c).Absolute().Left(max(x, 8)).Top(max(y, 8)).
 		Width(groupCardW).Padding(16).Radius(10).Background(qq.menuBg).
-		Border(1, qq.menuLine).Shadow(0, 10, 26, 0, ui.RGBA(0, 0, 0, 0.40))
+		Border(1, qq.menuLine).Shadow(0, 10, 26, 0, ui.RGBA(0, 0, 0, 0.40)).
+		TransformOrigin(0, 0).Transition(cardArrives)
 	panel.Children(func() { a.groupCardBody(c) })
 }
 
@@ -82,6 +84,9 @@ func (a *App) groupCardPanel(c *ui.Context) {
 // are in it, what it is filed under, and the lines it says of itself.
 func (a *App) groupCardBody(c *ui.Context) {
 	g := a.group
+	if g != nil && g.ID != a.current {
+		g = nil
+	}
 	conv := a.currentConv()
 
 	name, avatar, id := "", "", a.current
@@ -101,7 +106,19 @@ func (a *App) groupCardBody(c *ui.Context) {
 	}
 
 	ui.Row(c).Gap(12).AlignItems(ui.Start).Children(func() {
-		a.avatar(c, avatar, name, 64)
+		// The face at the size it was uploaded, not a thumbnail of it:
+		// the card is opened on purpose, and pressed to look at it.
+		face := ui.Box(c).Size(64, 64).Cursor(ui.CursorPointer)
+		face.Children(func() {
+			var bmp *ui.Bitmap
+			if avatar != "" {
+				bmp = a.images.getBox(avatar, 0, 0, a)
+			}
+			ui.Avatar(c, name, bmp).Size(64, 64)
+		})
+		if face.Clicked() {
+			a.showPicture(avatar, 0, 0)
+		}
 		ui.Column(c).Grow(1).MinWidth(0).Gap(5).Children(func() {
 			ui.Text(c, name).FontSize(16).FontWeight(600).TextColor(qq.text).
 				Wrap()
@@ -167,14 +184,28 @@ func membersLine(id string, headcount int) string {
 	if headcount <= 0 {
 		return id
 	}
-	return id + " (" + i18n.T("group.people", i18n.Num(headcount)) + ")"
+	return i18n.T("group.members", id, i18n.Num(headcount))
 }
 
 // groupTitle is what the header of a group chat says: its name, and how many
 // are in it.
-func (a *App) groupTitle(name string) string {
-	if a.group == nil || a.group.Headcount <= 0 {
+// groupTitle is what the header of a group chat says: its name, and how
+// many are in it. The brackets are the locale's, not ASCII: a Chinese
+// header in half-width brackets reads as something pasted in.
+func (a *App) groupTitle(id, name string) string {
+	// The count belongs to the chat it was asked for: what is kept is
+	// the last group that answered, which may not be this one yet.
+	if a.group == nil || a.group.ID != id || a.group.Headcount <= 0 {
 		return name
 	}
-	return name + " (" + strconv.Itoa(a.group.Headcount) + ")"
+	return i18n.T("chat.groupTitle", name, strconv.Itoa(a.group.Headcount))
+}
+
+// cardArrives is how a card comes and goes: it grows into place from the
+// corner it is hung by, rather than being there the moment it is asked for.
+var cardArrives = ui.ElementTransition{
+	Duration: 170 * time.Millisecond,
+	Ease:     ui.EaseOut,
+	Enter:    &ui.Motion{Y: -10, Opacity: 0, Scale: 0.96},
+	Exit:     &ui.Motion{Y: -6, Opacity: 0, Scale: 0.98},
 }

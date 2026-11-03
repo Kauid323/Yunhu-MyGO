@@ -14,6 +14,10 @@ import (
 // system's dark mode or its language switches the window's too, without a
 // setting of its own.
 func (a *App) view(c *ui.Context) {
+	// The pictures this frame asks for are the ones it draws, and the cache
+	// keeps them while it does: what is on screen is not dropped to make
+	// room for what is on screen.
+	a.images.beginFrame()
 	// The sign-in panel is drawn in the colours of the client it copies,
 	// in either appearance: it is looked at before there is an account to
 	// have an appearance with.

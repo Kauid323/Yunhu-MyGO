@@ -131,6 +131,11 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
   参数由 `message.Printer` 写成本地写法（`1,234`），不要自己 `fmt.Sprintf`。
   日期格式也是词条（`time.clock`、`time.date`），不是写死的 layout。
 - 布局不能假设文案长度：按钮和标签允许换行或被截断，不要写死宽度。
+- **「谁说的: 说了什么」用半角冒号，且冒号后面不留空格**（`conv.said`、`notice.more`、
+  `quoteTextOf`）：这条线是消息的一部分，服务端 `conv.Content` 给的就是 `名字:内容`
+  （半角、无空格），我们拼出来必须一模一样。以前 `format.go` 里有个 `cnColon` 专门把
+  半角换成全角「：」，已经删了；`conv.said` 也从 `{who}: {what}` 改成 `{who}:{what}`
+  ——带个空格看起来就像全角冒号，和 API 那一行对不上。
 - 新增文案必须同时给 `zh-CN` 和 `en-US`，缺一个算未完成
   （`TestEveryKeyIsInEveryLanguage` 会红）。
 
@@ -168,6 +173,11 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
 - **注意 `farBack` 数的是行，不是像素**：`ui.ListState` 只给可见行号，所以「八成」
   是按条数算的。消息高度差得远（图、长文）时，触发点会跟着偏；想要按像素就得让
   mygo 把滚动偏移和内容高度暴露出来。
+- **往下也能续**（`wantNewer` / `loadNewer`）：从搜索跳进来的历史是半截的，下面
+  还有消息。看到最后一行落进最下面五分之一就去要下一页（`list-message-by-seq`），
+  加到列表尾部，`Key` 是按消息 id 保位的，所以上面正在看的东西不会动。
+  闸门是「最后一条的 id 换过了没有」：停在底部时「滚到底了」每帧都成立，只有上一页
+  真的加进来了 id 才会变，不然一帧一页会把整段历史抽干。
 - **两边气泡同色**（`bubbleOther`）。谁说的由**位置**区分（自己在右、别人在左带头像和
   名字），不靠颜色——自己那侧没有第二种底色，`palette` 里也没有 `bubbleMine`。
 - **图片和表情不加气泡。** 气泡是给文字的，给照片套框就是加相框。表情的图在
@@ -210,6 +220,14 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
   `openChat`——会话列表还没加载也能打开。`App.notify` 是给测试用的钩子，生产路径走
   `mygo.NewNotification`。
 
+- **推送的消息要同时更新会话列表**（`onEvent` 的 `push_message` → `bump`）：以前当前会话
+  收到消息只 `addMessage` 就 `return`，列表里那一行永远是旧的预览和时间——看着就是
+  「ws 收到消息但列表不刷新」。现在不管是不是当前会话都 `bump`，区别只有未读数：
+  当前会话不加未读（已经在看了），别的会话加。
+- **列表里的那行是本地拼的**（`said`）：群聊拼成 `{发送者}: {内容}`，私聊只放内容
+  （名字就是会话名，再拼一遍是废话），自己发的不加前缀。通知正文（`tellArrival`）用
+  同一个 `said`，所以弹窗和列表说的是同一句话。
+- 推送里带 `MentionedIDs` 且含自己的时候，那一行会标上 @。
 ## 6. 登录：面板 / 密码 / 手机号
 
 登录是**一个自己的窗口**（320×460，`TitleBarHidden` + `HideWindowButtons`），不是聊天
@@ -313,8 +331,8 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
 - **表情面板**（`stickers.go`）：`POST /v1/expression/list` 拿收藏（JSON，390 条那种），
   面板浮在输入框上方，点一张就发。发的时候 `content_type=7`，`msg_content.image` 是
   相对路径、`expression_id`（proto 字段 15，**字符串**）是表情 id——少给 id 服务端会当成
-  图片，之后就加不回收藏。图片地址要补 `https://chat-img.jwznb.com/`。
-- **还没接的**：发图片/文件/语音（要七牛上传：`/v1/misc/qiniu-token` → 查上传 host →
+  图片，之后就加不回收藏。图片地址要补 `https://chat-img.jwznb.com/`。面板里的图按
+  格子大小（88px）要，行用 `ui.List` 只建看得见的那些——理由见 §11。- **还没接的**：发图片/文件/语音（要七牛上传：`/v1/misc/qiniu-token` → 查上传 host →
   上传 → 再发消息，这条链还没写）、通话/屏幕共享/群应用（没有对应 API）、收藏/调色盘/
   聊天记录管理（没有对应 API）、「独立窗口」那种每个会话一个窗口（要多份会话状态）。
 
@@ -369,15 +387,20 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
   - 创建群聊走 `POST /v1/group/create-group`（protobuf：name=2，intro=3，回 group_id=2），
     建完刷新列表；创建机器人走 `POST /v1/bot/web-edit-bot`（JSON，不带 botId 就是新建）。
   - 加好友/群是 `dim`：接口里没有「申请加好友」的路由，画出来但点不动。
-- **群聊的顶部是「名字 (人数)」**，点它开**群卡片**（`groupcard.go`）：和用户卡片同一套
-  做法——浮在窗口上的面板（`Absolute` + 遮罩关掉），不是挂在标题上的 popup。
+- **群聊的顶部是「名字（人数）」，16.5px，只有这一行**，点它开**群卡片**
+  （`groupcard.go`）：和用户卡片同一套做法——浮在窗口上的面板（`Absolute` + 遮罩关掉），
+  不是挂在标题上的 popup。
   - 人数来自 `POST /v1/group/info`（protobuf：请求 group_id=2；回 data 里 name=2、
     avatar=3、introduction=5、headcount=6、category_name=11），开群聊时拉一次，
-    拉回来之前顶部先显示没有人数。
-  - 卡片里：脸、名字、`群号 (N人)`、分类小标签、备注 / 群介绍 / 群分类三行、分享 / 发消息。
+    拉回来之前顶部先显示没有人数；`a.group.ID` 不是当前会话就不显示，免得显示上一个群。
+  - 卡片里：脸、名字、`群号（N人）`、分类小标签、备注 / 群介绍 / 群分类三行、分享 / 发消息。
     **群公告没有做**——接口的 GroupData 里没有这个字段（只有 introduction 和 group_code），
     与其编一行不如不显示。
   - 分享 = 把群号复制到剪贴板；发消息 = 关掉卡片。
+- 顶部**不再显示「群聊 · 群号」**那行：它是接口里的东西，不是读消息的人要看的。
+- 中文界面不用半角标点：列表那行的冒号由 `said` 按 `conv.said`（zh 是 `{who}：{what}`）
+  拼出来；服务端给的行是半角冒号，画之前过一遍 `cnColon`（前缀超过 16 字、或像
+  `https://` 的地址不动）。
 ## 10. 聊天记录搜索窗口
 
 输入框左边那个钟（`iconHistory`）打开一个**单独的窗口**（660×720，`searchwin.go` +
@@ -402,6 +425,35 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
   onPick)`，`PopoverBase` + `AttachTo` 挂在按钮下面，所以换谁用都长一样、都从按钮上
   长出来。三页：日 → 月 → 年，点标题往上走、点年份往下走，翻页有 120ms 的淡入
   （`walked` + `c.After`）。今天用蓝色字，选中的那天是蓝底白字。
+- **日期轴钉在 tab 下面**（`searchSticky`）：`ListState.Visible()` 拿到当前第一行，
+  取那一天的日期画在结果区顶上（38 高的 `Absolute` 盒子，背景是 `qq.chatBg`，把滚过去的
+  行盖住）。换天的时候旧的往上飘出去、新的从下面顶上来（170ms），不是「啪」一下换字。
+  日期在带子偏下的位置（Top 16），**下面不画线**：贴着 tab 会像是 tab 的一部分，画线
+  就是结果区里多一条横线。日头本身（`searchDay`）也只有日期，没有线。
+- **tab 的下划线是一整条，不是每个 tab 一条**（`searchTabLine`）：按下 tab 之后用
+  `tabX/tabW` 从上一个位置缓动过去（160ms），这样读起来是「同一条线移过去了」。
+  所以 `searchTab` 只画字，返回元素给外面量位置。
+- **翻页**：`search.more` 由「这一页拿满了 `searchPage` 条」决定；列表最后一行是
+  `searchMore`，它被画出来就等于被滚到了，画的时候就去要下一页（`searchLoadMore`，
+  `time` 传当前最旧一条的时间）。接口会把边界那条再给一次，按 id 去重。
+  一次会话最多留 `searchKeep` 条。
+- **点结果跳转**（`searchJump`）：结果里带着消息的 `id` 和 `sequence`，所以不翻页。
+  `jumpToMessage(id, seq)` 先在已经载入的历史里找，找到就只滚过去；找不到就
+  `loadAround` 一次 `POST /v1/msg/list-message-by-mid-seq`（`msg_seq` + `msg_id`
+  + `msg_count`），拿到的这一页**以那条消息开头**、往后带 `msgPage` 条，直接当成
+  历史（`setAround`），列表滚到它上面，并且那条消息会亮 1.2 秒（`flash`/`flashRow`）
+  ——只滚不停，眼睛是找不到的。
+  - 这一页是「从它开始往后」，不是「它之前」：往上没有的东西靠原来的 `loadOlder`
+    接着翻，往下没有的东西靠 `loadNewer`（`POST /v1/msg/list-message-by-seq`，
+    只给 `msg_start`，一页 30 条）接着翻，两条路都是滚到了才问。
+  - `hasNewer` 由「这一页拿满了 `msgAfter` 条」决定：不满就是已经到最新一条了。
+    `wantNewer` 的闸门是**最后一条的 id 没变过**，不是时间——列表停在底部时每帧都
+    满足「滚到底了」，只有 id 变了才说明上一页真的加进来了。
+  - 跳过去之后 `unreadFrom` / `readFrom` 都设成 `len(msgs)`：这条历史是读者自己
+    点进来的，下面那些不是「离开时进来的新消息」，不该画横线、也不该计数。
+  - 没有 `sequence` 的跳转（老调用）退回老路：一直 `loadOlder` 直到翻到。
+- 筛选面板进来时从右边滑入（`filterArrives`），日期选择器从按钮的左下角展开
+  （`TransformOrigin(0,0)`）。
 
 ## 11. 运行内存预算
 
@@ -419,8 +471,23 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
   mode 1，等比塞进盒子，不放大）。
   - 头像：显示尺寸 ×2（`avatarPixels`）。
   - 消息图片：原图各边 ÷4（`picturePixels`）。
-- 图片缓存按**像素字节数**封顶（`imageBudget`），不是按张数——一张 480px 的
+  - 表情面板里的小格子：`stickerCellPx`（44 DIP ×2），**不是**消息里表情的
+    `stickerPx`（240）。差 7 倍像素：390 张收藏用 240 要 90MB，用 88 只要 12MB。
+- 图片缓存按**像素字节数**封顶（`imageBudget`，24MB），不是按张数——一张 480px 的
   缩略图和一张 76px 的头像不该算作同样的「一张」。
+- **淘汰按「这一帧用没用过」算，不按插入顺序**（`imageEntry.used` + `beginFrame`）：
+  - 每帧开头 `a.images.beginFrame()` 把帧号 +1，`get` 命中就把这条的 `used` 记成当前帧；
+  - `trim` 只淘汰 `used < 当前帧` 的，最久没画的先走；**全都在画就不淘汰**，宁可这一帧
+    超预算。按插入顺序淘汰会把正在画的图删掉，下一帧又要下载、又要解码，于是一个面板
+    的图永远在「下载 → 被删 → 再下载」，看起来就是一直闪、一直重新渲染。
+  - 原来那个 `order []string` 就是这么坏的：命中不刷新顺序，等于 FIFO，不是 LRU。
+- **同时在下的图最多 8 张**（`fetchSem`）：一帧里画一整个面板会同时发几百个请求，
+  没解码的响应全在内存里（实测 heap 冲到 137MB）。排队比并发省得多。
+- **表情面板是 `ui.List`，不是 `Scroll` + `Column`**：`Scroll` 把每一行都建出来，
+  390 张收藏就是 390 张图每帧都要；`List` 只建看得见的那几行。注意 **`List` 要给
+  确定高度（`Height`），只给 `MaxHeight` 它没有「视口」可言，会把所有行都建出来**——
+  这个坑踩过，内存照样炸。行本身也要给 `Height`，否则行是「图片还没到时」量的，
+  会短一截，下一行压上来。
 - 只保留当前会话的消息：切换会话时 `a.msgs = nil`。
 - 历史靠翻页（`msgPage`），不预加载。
 - 测量：`MYGOHU_MEM=1 ./mygohu.exe`，每 5 秒打一行 heap / sys / 图片缓存字节数。
@@ -455,6 +522,11 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
 - 服务端 `https://chat-go.jwzhd.com`，WebSocket `wss://chat-ws-go.jwzhd.com/ws`。
 - 握手后服务端**不回 login ack**，直接推二进制帧；别等 ack 判断连上没有。
 - `POST /v1/msg/list-message` 返回**从新到旧**，入库前要反转。
+- `POST /v1/msg/list-message-by-mid-seq`（`msg_seq` + `msg_id` + `msg_count`）返回
+  **以那条消息开头、往后（更新）** 的一页，条数是 `msg_count + 1`，也是从新到旧；
+  搜索结果里的 `sequence` 就是消息的 `msgSeq`，两者对得上，所以跳转能一次到位。
+- `POST /v1/msg/list-message-by-seq`（只给 `msg_start`）返回那条 seq **之后**的一页，
+  一页 30 条，**没有 count 参数**；用来补跳转之后下半截的历史。
 - 发消息的响应是包了一层的 `StatusResponse`，`code == 1` 才是成功。
 - 图片 CDN 有防盗链，必须带 `Referer: https://chat-go.jwzhd.com`，否则 403。
 - 消息内容类型：1 文本、2 图片、3 Markdown、4 文件、5 表单、7 表情、8 HTML、

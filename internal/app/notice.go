@@ -39,10 +39,17 @@ func (a *App) tellArrival(m *yh.Message) {
 	if !a.notices || m == nil || a.prefs.NoticeKind == "off" {
 		return
 	}
-	if m.Sender.ChatType == yh.ChatGroup && !a.prefs.NotifyGroup {
+	// What kind of chat it is comes from the list, not from the message:
+	// the sender of a message in a group is a user, and a notice that
+	// took the sender for the chat would say nothing of who spoke.
+	ct := a.chatTypeOf(m.ChatID)
+	if ct == 0 {
+		ct = m.Sender.ChatType
+	}
+	if ct == yh.ChatGroup && !a.prefs.NotifyGroup {
 		return
 	}
-	if m.Sender.ChatType != yh.ChatGroup && !a.prefs.NotifyFriend {
+	if ct != yh.ChatGroup && !a.prefs.NotifyFriend {
 		return
 	}
 	if a.muted(m.ChatID) != "notify" {
@@ -62,7 +69,11 @@ func (a *App) tellArrival(m *yh.Message) {
 	// wherever it reaches. The settings say whether it says that much at
 	// all.
 	if a.prefs.NoticeDetail {
-		n.body = clip(preview(m.ContentType, m.Content))
+		me := ""
+		if a.me != nil {
+			me = a.me.ID
+		}
+		n.body = clip(said(m, ct, me))
 	} else {
 		n.body = i18n.T("notice.quiet")
 	}

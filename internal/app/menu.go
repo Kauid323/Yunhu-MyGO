@@ -75,17 +75,25 @@ func showMenu(c *ui.Context, anchor ui.Element, m *menu) {
 	if width == 0 {
 		width = menuWidth
 	}
+	// Where it grows from, and how it comes: out of the corner it is hung
+	// by, rising for the rail's menu and coming down for a menu under the
+	// top of a window.
+	originX, originY := float32(0), float32(1)
+	arrives := menuArrives
 	at, self := ui.AnchorBottomRight, ui.AnchorBottomLeft
 	switch {
 	case m.point:
 		// Its top left on the place that was pressed, opening away from
 		// it and folding back where the window has no room.
 		at, self = ui.AnchorTopLeft, ui.AnchorTopLeft
+		originX, originY = 0, 0
 	case m.below:
 		// Hanging straight down from the button's right edge, so that a
 		// menu at the top of a window opens over what is under it rather
 		// than off the screen.
 		at, self = ui.AnchorBottomRight, ui.AnchorTopRight
+		originX, originY = 1, 0
+		arrives = menuArrivesBelow
 	}
 	ui.PopoverBase(c, anchor, &m.open, func(panel ui.Element) {
 		// The bottom left of the panel sits at the bottom right of the
@@ -95,7 +103,7 @@ func showMenu(c *ui.Context, anchor ui.Element, m *menu) {
 			Width(width).Padding(6).Radius(10).
 			Background(qq.menuBg).Border(1, qq.menuLine).
 			Shadow(0, 8, 22, 0, ui.RGBA(0, 0, 0, 0.30)).
-			TransformOrigin(0, 1).Transition(menuArrives)
+			TransformOrigin(originX, originY).Transition(arrives)
 		if !m.below && !m.point {
 			panel.Left(8)
 		}
@@ -193,4 +201,14 @@ func moreMenu(a *App) menu {
 			{icon: iconPower, label: "menu.logout", do: a.logout},
 		},
 	}
+}
+
+// menuArrivesBelow is how a menu hung under its button comes and goes: it
+// grows down out of the button's corner, as a list opened from the top of a
+// window should, rather than rising into place as the rail's menu does.
+var menuArrivesBelow = ui.ElementTransition{
+	Duration: 140 * time.Millisecond,
+	Ease:     ui.EaseOut,
+	Enter:    &ui.Motion{Y: -8, Opacity: 0, Scale: 0.95},
+	Exit:     &ui.Motion{Y: -6, Opacity: 0, Scale: 0.97},
 }

@@ -36,10 +36,13 @@ const (
 )
 
 // msgPage is how many messages a page asks for, and msgFirst how many the
-// first page of a chat loads.
+// first page of a chat loads. msgAfter is how many the route that lists what
+// follows a sequence answers with: it takes no count of its own, so a page
+// that comes back shorter than this has reached the newest message.
 const (
 	msgPage  = 30
 	msgFirst = 50
+	msgAfter = 30
 )
 
 // efficientW and efficientH are the window the chat is read in: the rail,
@@ -157,6 +160,26 @@ type App struct {
 	// jumpTo is the row the list is scrolled to as it is built, or -1 for
 	// none: a jump is asked for while the list is built, not after.
 	jumpTo int
+	// jumpID is the message a jump was asked for, until it is in the
+	// history, and flashID the one that was found, marked for a moment so
+	// that it is seen rather than only scrolled to. jumpSeq is where that
+	// message sits in the chat, which is what asks for the page it is on
+	// rather than paging back to it.
+	jumpID  string
+	jumpSeq uint64
+	// loadingAround says the page a jump asked for is on its way: the
+	// history is empty until it comes, and asking again would ask twice.
+	loadingAround bool
+	// hasNewer says the history was opened in the middle of itself, and
+	// that there are messages below the last one here; loadingNewer says
+	// the page of them is on its way. newerFrom is the last message the
+	// page was asked for at, so that a list resting at its end does not
+	// ask on every frame.
+	hasNewer     bool
+	loadingNewer bool
+	newerFrom    string
+	flashID      string
+	flashAt      time.Time
 	// viewer is the window a picture was opened in, if one is open.
 	viewer *viewer
 	// settings is the settings window, if it is open, and what it shows,
@@ -170,6 +193,9 @@ type App struct {
 	// and dock is where the classic panel is on its way to and from the
 	// edge of the screen.
 	prefs prefs
+	// railK is how filled each section of the rail is drawn: 1 for the one
+	// that is open, 0 for the rest, and the frames between while it fills.
+	railK [6]float32
 	// convMenu is the menu a right press on a chat opens, and msgMenu the
 	// one a right press on a message opens: where each was pressed is part
 	// of it, as neither comes out of a button.
@@ -191,10 +217,13 @@ type App struct {
 	dock      dock
 	// stickers are the account's saved stickers, which the panel over the
 	// composer shows, and whether that panel is open: the list is asked for
-	// once, when it is first shown.
+	// once, when it is first shown. stickerList is how far down that panel
+	// has been scrolled: only the rows in view are drawn, so a collection of
+	// hundreds costs the pictures in five rows rather than all of them.
 	stickers    []yh.Expression
 	stickerOpen bool
 	stickerGo   bool
+	stickerList ui.ListState
 	// space is what the app takes up on this machine, as the storage page
 	// reports it, and whether it is being measured.
 	space   space
