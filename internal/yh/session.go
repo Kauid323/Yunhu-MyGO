@@ -8,12 +8,21 @@ import (
 
 // Session is what the app keeps between runs: the account's token, and
 // what it needs to sign in again.
+//
+// Name and Avatar are the account as the sign-in screen shows it while it
+// is not signed in: the face and the name at the top of the panel are the
+// account that was here last, not one that has been proved.
 type Session struct {
 	Token    string `json:"token"`
 	Email    string `json:"email,omitempty"`
 	Phone    string `json:"phone,omitempty"`
 	DeviceID string `json:"deviceId"`
 	Base     string `json:"base,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Avatar   string `json:"avatar,omitempty"`
+	// Password is kept when the reader asks to be remembered: signing in
+	// again after the token has gone is then a press rather than a form.
+	Password string `json:"password,omitempty"`
 }
 
 // ConfigPath is where the app keeps its session.

@@ -59,8 +59,25 @@ func main() {
 	// MYGOHU_CAPTURE draws the window of the chat.
 	openSettings := os.Getenv("MYGOHU_SETTINGS") != ""
 	settingsShot := os.Getenv("MYGOHU_CAPTURE_SETTINGS")
+	openSearch := os.Getenv("MYGOHU_SEARCH") != ""
+	searchShot := os.Getenv("MYGOHU_CAPTURE_SEARCH")
 	mygo.App.WhenReady(func() {
 		a.Start()
+		if openSearch {
+			// The window the history is searched in, opened on the first
+			// chat once the list of them has come back.
+			go func() {
+				time.Sleep(5 * time.Second)
+				a.OpenFirstSearch()
+				if searchShot == "" {
+					return
+				}
+				time.Sleep(3 * time.Second)
+				if err := a.CaptureSearch(searchShot); err != nil {
+					log.Println("capture search:", err)
+				}
+			}()
+		}
 		if !openSettings {
 			return
 		}

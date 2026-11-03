@@ -128,27 +128,35 @@ func (a *App) messageRow(c *ui.Context, m *yh.Message, i int) {
 	}
 
 	if m.Mine(a.me.ID) {
-		ui.Row(c).Children(func() {
+		row := ui.Row(c)
+		row.Children(func() {
 			ui.Spacer(c)
 			a.bubble(c, m)
 		})
+		a.rightClickMessage(m, row)
 		return
 	}
 
-	// The face opens what is known about whoever said it, and the row knows
-	// when the pointer is on it: the time of a message is shown then, as the
-	// chat this window copies shows it.
+	// The face opens what is known about whoever said it. The time of a
+	// message is asked for by resting on the message, and the column is
+	// only as wide as the name and the bubble in it: the room beside a
+	// short message is not the message, so passing through it asks for
+	// nothing. The column hugs them rather than filling the row for the
+	// same reason a bubble is not stretched by the time appearing in the
+	// line above it.
+	var col ui.Element
 	row := ui.Row(c).Gap(9).AlignItems(ui.Start)
 	row.Children(func() {
 		a.messageAvatar(c, m.Sender, 32)
-		ui.Column(c).MaxWidth(540).Gap(4).Children(func() {
+		col = ui.Column(c).MaxWidth(540).Gap(4).AlignItems(ui.Start)
+		col.Children(func() {
 			name := m.Sender.Name
 			if name == "" {
 				name = m.Sender.ChatID
 			}
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, name).FontSize(10.5).TextColor(qq.textMuted).SingleLine()
-				if row.Hovered() {
+				if a.stampOn(c, m) {
 					ui.Text(c, stampText(m.Time())).FontSize(10).
 						TextColor(qq.textFaint).SingleLine()
 				}
@@ -156,6 +164,8 @@ func (a *App) messageRow(c *ui.Context, m *yh.Message, i int) {
 			a.bubble(c, m)
 		})
 	})
+	a.hoverStamp(c, m, col)
+	a.rightClickMessage(m, row)
 }
 
 // messageAvatar is the face of whoever said a message, which opens the card of
@@ -168,8 +178,49 @@ func (a *App) messageAvatar(c *ui.Context, s yh.Sender, size float32) {
 	}
 }
 
-// stampText is a time as a message writes it when the pointer is on it: the day
-// and the hour, to the second, as the chat this window copies does.
+// stampWait is how long the pointer has to rest on a message before its time
+// is shown: the time answers a question asked by staying, so that a pointer
+// crossing the history on its way somewhere else says nothing.
+const stampWait = 3 * time.Second
+
+// stampOn reports whether a message is showing its time. The wait is ended by
+// the frame asked for when the pointer settled, and that frame draws the time
+// in the same pass rather than one after it.
+func (a *App) stampOn(c *ui.Context, m *yh.Message) bool {
+	if a.hoverID != m.MsgID || a.hoverAt.IsZero() {
+		return false
+	}
+	if a.stampID == m.MsgID {
+		return true
+	}
+	if c.Now().Sub(a.hoverAt) < stampWait {
+		return false
+	}
+	a.stampID = m.MsgID
+	return true
+}
+
+// hoverStamp notes where the pointer is. Settling on a message starts the
+// wait, and leaving takes the time with it: a time left behind on a message
+// nobody is looking at would be a time shown to the wrong reader.
+func (a *App) hoverStamp(c *ui.Context, m *yh.Message, box ui.Element) {
+	if box.Hovered() {
+		if a.hoverID == m.MsgID {
+			return
+		}
+		a.hoverID, a.hoverAt, a.stampID = m.MsgID, c.Now(), ""
+		// The margin is for the frame that is asked for, which may come a
+		// hair before the wait is up.
+		c.After(stampWait + 20*time.Millisecond)
+		return
+	}
+	if a.hoverID == m.MsgID {
+		a.hoverID, a.hoverAt, a.stampID = "", time.Time{}, ""
+	}
+}
+
+// stampText is a time as a message writes it when the pointer rests on it: the
+// day and the hour, to the second, as the chat this window copies does.
 func stampText(t time.Time) string {
 	if !real(t) {
 		return ""
@@ -308,13 +359,14 @@ func (a *App) bubble(c *ui.Context, m *yh.Message) {
 // quoteBlock is the message a message answers, above what it says: who said
 // it, and what they said. It is a step off the bubble, and comes forward with
 // a shadow under the pointer, as the chat this window copies does.
+// quoteBlock is what a message answers, above what it says. It has no
+// ground of its own: a quote sits in the bubble it is in, told apart from
+// the answer by the line down its left and the dimmer words, so that the
+// bubble reads as one thing rather than as a box inside a box.
 func quoteBlock(c *ui.Context, text string) {
 	name, body := splitQuote(text)
-	box := ui.Column(c).Padding(6, 8).Radius(5).Gap(2).
-		Background(qq.quoteBg).Cursor(ui.CursorPointer)
-	if box.Hovered() {
-		box.Background(qq.quoteHover).Shadow(0, 2, 8, 0, ui.RGBA(0, 0, 0, 0.35))
-	}
+	box := ui.Column(c).Gap(2).Padding(1, 0, 1, 10).
+		BorderWidth(0, 0, 0, 2).BorderColor(qq.quoteBar)
 	box.Children(func() {
 		if name != "" {
 			ui.Text(c, name).FontSize(10.5).TextColor(qq.textMuted).SingleLine()

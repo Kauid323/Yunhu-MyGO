@@ -31,7 +31,18 @@ var menuArrives = ui.ElementTransition{
 
 // menu is one popup menu: what it holds, and whether it is open.
 type menu struct {
-	open  bool
+	open bool
+	// width is how wide it is, and menuWidth when it is not said: a menu
+	// in a panel 320 wide cannot be as wide as one in the window.
+	width float32
+	// below opens it under its button rather than above it, which is what
+	// a menu at the top of a window needs: the rail's button is at the
+	// foot, and its menu opens up and away from it.
+	below bool
+	// point hangs it off a place rather than off a button: a menu opened
+	// by a right press has no button to come out of, and opens from the
+	// point that was pressed.
+	point bool
 	quick []menuItem
 	rows  []menuItem
 }
@@ -43,7 +54,14 @@ type menuItem struct {
 	icon  *ui.SVG
 	label string // a key of the dictionary
 	more  bool   // the row opens a menu of its own, and says so with a chevron
-	do    func()
+	// dim is a row that is drawn but cannot be taken: a feature the
+	// client does not have yet is shown as one that is not there rather
+	// than left out, as the client it copies dims what it cannot do.
+	dim bool
+	// text is a label that is not a key of the dictionary, as the name
+	// of a chat is: a menu of chats says what they are called.
+	text string
+	do   func()
 }
 
 // showMenu draws m beside anchor while it is open, and closes it on a
@@ -53,15 +71,34 @@ func showMenu(c *ui.Context, anchor ui.Element, m *menu) {
 	if !m.open {
 		return
 	}
+	width := m.width
+	if width == 0 {
+		width = menuWidth
+	}
+	at, self := ui.AnchorBottomRight, ui.AnchorBottomLeft
+	switch {
+	case m.point:
+		// Its top left on the place that was pressed, opening away from
+		// it and folding back where the window has no room.
+		at, self = ui.AnchorTopLeft, ui.AnchorTopLeft
+	case m.below:
+		// Hanging straight down from the button's right edge, so that a
+		// menu at the top of a window opens over what is under it rather
+		// than off the screen.
+		at, self = ui.AnchorBottomRight, ui.AnchorTopRight
+	}
 	ui.PopoverBase(c, anchor, &m.open, func(panel ui.Element) {
 		// The bottom left of the panel sits at the bottom right of the
 		// button, so that the two end on the same line and the menu opens
 		// up and away from the rail.
-		panel.AttachTo(anchor, ui.AnchorBottomRight, ui.AnchorBottomLeft).
-			Left(8).Width(menuWidth).Padding(6).Radius(10).
+		panel.AttachTo(anchor, at, self).
+			Width(width).Padding(6).Radius(10).
 			Background(qq.menuBg).Border(1, qq.menuLine).
 			Shadow(0, 8, 22, 0, ui.RGBA(0, 0, 0, 0.30)).
 			TransformOrigin(0, 1).Transition(menuArrives)
+		if !m.below && !m.point {
+			panel.Left(8)
+		}
 		menuBody(c, m)
 	})
 }
@@ -105,19 +142,30 @@ func menuQuick(c *ui.Context, m *menu, it menuItem) {
 // row that opens more.
 func menuRow(c *ui.Context, m *menu, it menuItem) {
 	row := ui.Row(c).Height(menuRowH).Padding(0, 8).Gap(11).Radius(6).
-		AlignItems(ui.Center).Cursor(ui.CursorPointer)
-	if row.Hovered() {
+		AlignItems(ui.Center)
+	if !it.dim {
+		row.Cursor(ui.CursorPointer)
+	}
+	if row.Hovered() && !it.dim {
 		row.Background(qq.menuHover)
 	}
 	row.Children(func() {
-		ui.Icon(c, it.icon).FontSize(19).TextColor(qq.menuText)
-		ui.Text(c, i18n.T(it.label)).FontSize(13.5).TextColor(qq.menuText).
+		ink := qq.menuText
+		if it.dim {
+			ink = qq.menuTextMuted
+		}
+		ui.Icon(c, it.icon).FontSize(19).TextColor(ink)
+		label := it.text
+		if label == "" {
+			label = i18n.T(it.label)
+		}
+		ui.Text(c, label).FontSize(13.5).TextColor(ink).
 			Grow(1).MinWidth(0).SingleLine()
 		if it.more {
 			ui.Icon(c, iconChevronRight).FontSize(12).TextColor(qq.menuTextMuted)
 		}
 	})
-	if row.Clicked() {
+	if row.Clicked() && !it.dim {
 		m.open = false
 		if it.do != nil {
 			it.do()

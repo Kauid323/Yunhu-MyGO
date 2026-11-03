@@ -62,17 +62,23 @@ func (a *App) currentConv() *yh.Conversation {
 	return nil
 }
 
-// filteredConvs are the conversations the search keeps.
+// filteredConvs are the conversations the search keeps, with the chats that
+// were pinned at the top of them: a pinned chat is one that is looked at
+// first, whatever was said in the others.
 func (a *App) filteredConvs() []yh.Conversation {
 	q := strings.ToLower(strings.TrimSpace(a.filter))
-	if q == "" {
-		return a.convs
-	}
 	var out []yh.Conversation
 	for _, c := range a.convs {
-		if strings.Contains(strings.ToLower(c.Title()), q) || strings.Contains(strings.ToLower(c.Content), q) {
-			out = append(out, c)
+		if q != "" && !strings.Contains(strings.ToLower(c.Title()), q) &&
+			!strings.Contains(strings.ToLower(c.Content), q) {
+			continue
 		}
+		out = append(out, c)
+	}
+	if len(a.prefs.Pinned) > 0 {
+		sort.SliceStable(out, func(i, j int) bool {
+			return a.prefs.Pinned[out[i].ChatID] && !a.prefs.Pinned[out[j].ChatID]
+		})
 	}
 	return out
 }

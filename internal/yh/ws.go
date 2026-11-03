@@ -98,7 +98,11 @@ func (c *Conn) Run(ctx context.Context) {
 func (c *Conn) session(ctx context.Context) error {
 	dialCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	ws, _, err := websocket.Dial(dialCtx, c.client.WSBase, nil)
+	// The socket is opened with the client's own HTTP client, so that a
+	// proxy set for the requests covers the chat as well.
+	ws, _, err := websocket.Dial(dialCtx, c.client.WSBase, &websocket.DialOptions{
+		HTTPClient: c.client.HTTP(),
+	})
 	if err != nil {
 		return err
 	}

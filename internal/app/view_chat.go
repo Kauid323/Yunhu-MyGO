@@ -4,6 +4,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"mygohu/internal/i18n"
+	"mygohu/internal/yh"
 )
 
 // chatPane is the open conversation: its header, its messages and the
@@ -21,15 +22,24 @@ func (a *App) chatHeader(c *ui.Context) {
 	conv := a.currentConv()
 	ui.Row(c).Height(52).Padding(0, 16).Gap(2).AlignItems(ui.Center).
 		BorderWidth(0, 0, 1, 0).BorderColor(qq.border).Children(func() {
-		ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
-			title, sub := i18n.T("app.name"), connState(a.live)
+		// The title is a way into the card of a group: a press on it asks
+		// the group what it says of itself, and shows it beside the name.
+		title := ui.Column(c).Grow(1).MinWidth(0).Gap(1).Cursor(ui.CursorPointer)
+		title.Children(func() {
+			name, sub := i18n.T("app.name"), connState(a.live)
 			if conv != nil {
-				title = conv.Title()
+				name = conv.Title()
+				if conv.ChatType == yh.ChatGroup {
+					name = a.groupTitle(name)
+				}
 				sub = i18n.T("chat.headerSub", kindName(conv.ChatType), conv.ChatID)
 			}
-			ui.Text(c, title).FontSize(14).FontWeight(600).TextColor(qq.text).SingleLine()
+			ui.Text(c, name).FontSize(14).FontWeight(600).TextColor(qq.text).SingleLine()
 			ui.Text(c, sub).FontSize(10).TextColor(qq.textFaint).SingleLine()
 		})
+		if title.Clicked() && conv != nil && conv.ChatType == yh.ChatGroup {
+			a.openGroupCard(title.Bounds())
+		}
 		if conv != nil {
 			for _, ic := range []*ui.SVG{iconPhone, iconVideo, iconShare, iconGrid} {
 				a.headerIcon(c, ic)

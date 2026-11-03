@@ -14,8 +14,16 @@ import (
 // system's dark mode or its language switches the window's too, without a
 // setting of its own.
 func (a *App) view(c *ui.Context) {
-	qq = skin(a.dark(c))
-	c.SetTheme(theme(qq.dark))
+	// The sign-in panel is drawn in the colours of the client it copies,
+	// in either appearance: it is looked at before there is an account to
+	// have an appearance with.
+	if a.winLogin || a.me == nil {
+		qq = skin(true)
+		c.SetTheme(theme(true))
+	} else {
+		qq = skin(a.dark(c))
+		c.SetTheme(theme(qq.dark))
+	}
 	i18n.Set(c.Locale())
 
 	// The layer the popups are drawn in is made here, every frame, rather
@@ -23,10 +31,16 @@ func (a *App) view(c *ui.Context) {
 	// when it is born into a parent that was there the frame before, and
 	// a layer made along with it is not. The card of a user is drawn in
 	// it, over whatever window is showing the history.
-	ui.Overlay(c, func() { a.userCard(c) })
+	ui.Overlay(c, func() {
+		a.userCard(c)
+		a.convMenuView(c)
+		a.msgMenuView(c)
+		a.askView(c)
+		a.groupCardPanel(c)
+	})
 
 	ui.Column(c).Fill().Background(qq.chatBg).Children(func() {
-		if a.me == nil {
+		if a.winLogin || a.me == nil {
 			a.loginView(c)
 			return
 		}

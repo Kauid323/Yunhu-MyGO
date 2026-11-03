@@ -17,14 +17,22 @@ func (a *App) composer(c *ui.Context) {
 		BorderWidth(1, 0, 0, 0).BorderColor(qq.border).Children(func() {
 		ready := strings.TrimSpace(a.input) != "" && a.current != ""
 
+		// What the next message answers, if it answers one: the words it
+		// answers sit over the field, and go with the text when it is sent.
+		if a.quote != nil {
+			a.quoteBar(c)
+		}
+
 		tools := ui.Row(c).Gap(0).AlignItems(ui.Center)
 		tools.Children(func() {
 			// The stickers are the one tool that does something yet: a
 			// press opens the account's saved ones over the row.
 			a.toolAction(c, iconEmoji, a.stickerOpen, a.toggleStickers)
-			for _, ic := range []*ui.SVG{iconScissors, iconFolder, iconImage, iconMic, iconAt, iconHistory} {
+			for _, ic := range []*ui.SVG{iconScissors, iconFolder, iconImage, iconMic, iconAt} {
 				a.toolIcon(c, ic)
 			}
+			// The clock opens the chat's history: what was said in it, searched.
+			a.toolAction(c, iconHistory, false, a.OpenSearch)
 		})
 		a.stickersPanel(c, tools)
 
@@ -98,4 +106,26 @@ func (a *App) toolAction(c *ui.Context, ic *ui.SVG, lit bool, do func()) {
 	if box.Clicked() {
 		do()
 	}
+}
+
+// quoteBar is the message being answered, over the field: the same line
+// down the left as the quote in a bubble has, with the way to stop
+// answering it at its right.
+func (a *App) quoteBar(c *ui.Context) {
+	m := a.quote
+	ui.Row(c).Height(26).Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Box(c).Width(2).FillHeight().Background(qq.quoteBar)
+		ui.Text(c, quoteTextOf(m)).FontSize(11).TextColor(qq.textMuted).
+			Grow(1).MinWidth(0).SingleLine()
+		box := ui.Box(c).Size(18, 18).Radius(4).Center().Cursor(ui.CursorPointer)
+		if box.Hovered() {
+			box.Background(qq.inputBg)
+		}
+		box.Children(func() {
+			ui.Icon(c, iconClose).FontSize(10).TextColor(qq.textMuted)
+		})
+		if box.Clicked() {
+			a.quote = nil
+		}
+	})
 }

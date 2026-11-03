@@ -52,7 +52,8 @@ const (
 
 // The ways the sign-in screen signs in.
 const (
-	modePassword = iota
+	modeAccount = iota // the panel that shows the account that was here
+	modePassword
 	modePhone
 	modeToken
 )
@@ -72,6 +73,27 @@ type App struct {
 	screen   int
 	nav      int
 	infoOpen bool
+	// winLogin says the window is the sign-in panel rather than the
+	// chat's: the two are not the same window, and a window's frame is
+	// fixed when it is made (mainWindow, showWindow).
+	winLogin bool
+	// remembered is the account that was signed in last, as the panel
+	// shows it before there is one again: the face, the name and the
+	// address, which the session keeps.
+	remembered *yh.Session
+	// The panel's own: whether its menu is open, whether the network's
+	// page is shown, whether the type of proxy is listed, whether the
+	// accounts are listed, and how far the circle that adds one has come
+	// out of the face.
+	loginMenu     menu
+	loginProxy    bool
+	proxyOpen     bool
+	loginAccounts bool
+	plusOn        bool
+	plusHover     bool
+	plusK         float32
+	plusFrom      float32
+	plusAt        time.Time
 	// loginMode is which way the sign-in screen signs in: a password, a
 	// phone number and the code texted to it, or a token.
 	loginMode int
@@ -137,8 +159,10 @@ type App struct {
 	jumpTo int
 	// viewer is the window a picture was opened in, if one is open.
 	viewer *viewer
-	// settings is the settings window, if it is open, and what it shows.
+	// settings is the settings window, if it is open, and what it shows,
+	// and search is the window the chat's history is searched in.
 	settings *settings
+	search   *searchWin
 	// chatWin is the window a chat is open in when the classic layout has
 	// no room for it, if it is open.
 	chatWin *chatWin
@@ -146,7 +170,25 @@ type App struct {
 	// and dock is where the classic panel is on its way to and from the
 	// edge of the screen.
 	prefs prefs
-	dock  dock
+	// convMenu is the menu a right press on a chat opens, and msgMenu the
+	// one a right press on a message opens: where each was pressed is part
+	// of it, as neither comes out of a button.
+	convMenu convMenuState
+	msgMenu  msgMenuState
+	// quote is the message the next one answers, if one is being
+	// answered: it is shown over the composer and sent with the text.
+	quote *yh.Message
+	// convPlus is the menu of the button beside the search box, and ask
+	// the question that button can put.
+	convPlus menu
+	ask      ask
+	// group is what the group chat that is open says of itself, and
+	// groupOpen whether its card is shown, at groupAt.
+	group     *yh.Group
+	groupOpen bool
+	groupID   string
+	groupAt   ui.Rect
+	dock      dock
 	// stickers are the account's saved stickers, which the panel over the
 	// composer shows, and whether that panel is open: the list is asked for
 	// once, when it is first shown.
@@ -167,6 +209,12 @@ type App struct {
 	cardAvatar string
 	// cardAt is the face the card was opened beside, in the window's points.
 	cardAt ui.Rect
+	// hover is the message the pointer is resting on, and since when, and
+	// stamp is the one whose time the resting has earned: a time is shown
+	// to a reader who stays on a message, not to one passing over it.
+	hoverID string
+	hoverAt time.Time
+	stampID string
 	// notices says the desktop takes notifications, and pending is what
 	// arrived for the chats that are not open and has not been told about
 	// yet: timer is the wait for the end of the burst.
@@ -201,33 +249,93 @@ func New() *App {
 	// away only pauses that until the end comes back in view.
 	a.msgList.FollowEnd = true
 	a.more = moreMenu(a)
+	a.loginMenu = loginMenu(a)
+	a.convPlus = newChatMenu(a)
 	return a
+}
+
+// loginMenu is the menu of the panel's corner button: the network's
+// settings, the way to a forgotten password, and where to say what went
+// wrong. It is the window's own menu component, so that it comes and goes
+// the way every other menu does.
+func loginMenu(a *App) menu {
+	return menu{
+		width: 120,
+		below: true,
+		rows: []menuItem{
+			{icon: iconSettings, label: "login.menu.network", do: func() { a.loginProxy = true }},
+			{icon: iconLock, label: "login.menu.forgot", do: a.openRegister},
+			{icon: iconHelp, label: "login.menu.feedback", do: a.openFeedback},
+		},
+	}
 }
 
 // Start creates the window and resumes the saved session.
 func (a *App) Start() {
 	a.prefs = loadPrefs()
-	width, height, minW := efficientW, efficientH, 280
-	if a.prefs.Mode == modeClassic {
-		width, height = classicW, classicH
+	a.applyProxy()
+	if s, err := yh.LoadSession(); err == nil && s != nil {
+		a.remembered = s
+		a.email, a.phone = s.Email, s.Phone
 	}
-	a.win = mygo.NewWindow(mygo.WindowOptions{
-		Title:  i18n.T("app.name"),
-		Width:  width,
-		Height: height,
-		// The classic panel is narrow and the efficient one is not: the
-		// window has to be allowed to be either.
-		MinWidth:  minW,
-		MinHeight: 400,
-		Content:   ui.View(a.view),
-	})
+	// The sign-in panel and the chat window are two windows: one is the
+	// size of the client it copies and has no title bar of the desktop's,
+	// and the other is not. Which one this run needs is known before
+	// either is made.
+	a.winLogin = a.remembered == nil || a.remembered.Token == "" || !a.prefs.AutoLogin
+	a.win = a.mainWindow()
 	// A notification opens the chat it is about, on the window that is
 	// already here.
 	if mygo.NotificationsSupported() {
 		a.notices = true
 		mygo.App.OnNotificationClick(a.onNoticeClick)
 	}
-	a.resume()
+	if !a.winLogin {
+		a.resume()
+		return
+	}
+}
+
+// mainWindow makes the window the screen needs: the sign-in panel, or the
+// chat's own.
+func (a *App) mainWindow() *mygo.Window {
+	opts := mygo.WindowOptions{
+		Title:   i18n.T("app.name"),
+		Content: ui.View(a.view),
+	}
+	if a.winLogin {
+		opts.Width, opts.Height = loginW, loginH
+		opts.MinWidth, opts.MinHeight = loginW, loginH
+		// The panel has its own buttons in its corner, and no title bar
+		// of the desktop's above them.
+		opts.TitleBarStyle = mygo.TitleBarHidden
+		opts.HideWindowButtons = true
+		return mygo.NewWindow(opts)
+	}
+	opts.Width, opts.Height = efficientW, efficientH
+	opts.MinWidth, opts.MinHeight = 280, 400
+	if a.prefs.Mode == modeClassic {
+		opts.Width, opts.Height = classicW, classicH
+	}
+	return mygo.NewWindow(opts)
+}
+
+// showWindow puts the window the screen needs in place of the one that is
+// there, and closes that one: the panel and the chat are not the same
+// window, and a window's frame is fixed when it is made.
+func (a *App) showWindow() {
+	if want := a.me == nil; want != a.winLogin {
+		old := a.win
+		a.winLogin = want
+		a.win = a.mainWindow()
+		if old != nil && !old.IsDestroyed() {
+			old.Close()
+		}
+		return
+	}
+	if a.win != nil && !a.win.IsDestroyed() {
+		a.win.Invalidate()
+	}
 }
 
 // update runs fn on the main thread, then draws the window again.
@@ -247,6 +355,9 @@ func (a *App) update(fn func()) {
 		w.win.Invalidate()
 	}
 	if s := a.settings; s != nil && s.win != nil {
+		s.win.Invalidate()
+	}
+	if s := a.search; s != nil && s.win != nil && !s.win.IsDestroyed() {
 		s.win.Invalidate()
 	}
 }
@@ -294,4 +405,16 @@ func (a *App) capture(w *mygo.Window, path string) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
+}
+
+// CaptureSearch writes what the window the history is searched in shows to
+// path, as CaptureSettings does for the settings window.
+func (a *App) CaptureSearch(path string) error {
+	if a.search == nil || a.search.win == nil {
+		return errors.New("the search window is not open")
+	}
+	w := a.search.win
+	w.Invalidate()
+	time.Sleep(150 * time.Millisecond)
+	return a.capture(w, path)
 }

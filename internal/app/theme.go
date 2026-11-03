@@ -39,10 +39,9 @@ type palette struct {
 	mdCode, mdRule          ui.Color
 
 	// timePill is behind the time of a stretch of talking, which sits on the
-	// history as a mark rather than as a word. quoteBg is the block a
-	// message that answers another shows it in, and quoteHover what that
-	// block becomes under the pointer.
-	timePill, quoteBg, quoteHover ui.Color
+	// history as a mark rather than as a word. quoteBar is the line down the
+	// left of what a message answers, which has no ground of its own.
+	timePill, quoteBar ui.Color
 
 	// The popup menu is a step off the panels, with its own line.
 	menuBg, menuHover, menuLine ui.Color
@@ -127,9 +126,8 @@ var darkSkin = palette{
 	mdCode:  ui.RGBA(255, 255, 255, 0.10),
 	mdRule:  ui.RGBA(255, 255, 255, 0.16),
 
-	timePill:   ui.Hex("#2c2c2c"),
-	quoteBg:    ui.Hex("#262626"),
-	quoteHover: ui.Hex("#333333"),
+	timePill: ui.Hex("#2c2c2c"),
+	quoteBar: ui.RGBA(255, 255, 255, 0.22),
 
 	menuBg:        ui.Hex("#303030"),
 	menuHover:     ui.Hex("#404040"),
@@ -211,9 +209,8 @@ var lightSkin = palette{
 	mdCode:  ui.RGBA(0, 0, 0, 0.06),
 	mdRule:  ui.RGBA(0, 0, 0, 0.14),
 
-	timePill:   ui.Hex("#e6e6e6"),
-	quoteBg:    ui.Hex("#ececec"),
-	quoteHover: ui.Hex("#e0e0e0"),
+	timePill: ui.Hex("#e6e6e6"),
+	quoteBar: ui.RGBA(0, 0, 0, 0.20),
 
 	menuBg:        ui.Hex("#ffffff"),
 	menuHover:     ui.Hex("#f0f0f0"),

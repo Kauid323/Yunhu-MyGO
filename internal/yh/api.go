@@ -2,15 +2,20 @@ package yh
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/net/proxy"
 )
 
 // Default hosts, as the API documentation gives them.
@@ -60,6 +65,57 @@ func (c *Client) http() *http.Client {
 	}
 	return c.hc
 }
+
+// SetProxy makes every request go through a proxy: kind is "http" or
+// "socks5", and addr is the host and port it listens on ("127.0.0.1:7890").
+// An empty kind puts the requests back on the direct way, as they were.
+//
+// The client is replaced rather than changed under the requests already
+// running: a transport is not safe to swap while it is dialling.
+func (c *Client) SetProxy(kind, addr string) error {
+	addr = strings.TrimSpace(addr)
+	var tr *http.Transport
+	switch kind {
+	case "":
+	case "http", "https":
+		u, err := url.Parse(addr)
+		if err != nil {
+			return err
+		}
+		if u.Scheme == "" {
+			u.Scheme = "http"
+		}
+		if u.Host == "" {
+			return fmt.Errorf("yh: proxy %q has no host", addr)
+		}
+		tr = &http.Transport{Proxy: http.ProxyURL(u)}
+	case "socks5":
+		d, err := proxy.SOCKS5("tcp", addr, nil, proxy.Direct)
+		if err != nil {
+			return err
+		}
+		tr = &http.Transport{
+			DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+				return d.Dial(network, address)
+			},
+		}
+	default:
+		return fmt.Errorf("yh: unknown proxy kind %q", kind)
+	}
+	c.mu.Lock()
+	if tr == nil {
+		c.hc = &http.Client{Timeout: 25 * time.Second}
+	} else {
+		c.hc = &http.Client{Timeout: 25 * time.Second, Transport: tr}
+	}
+	c.mu.Unlock()
+	return nil
+}
+
+// HTTP is the client the requests go out with, proxy and all: the socket
+// the chat is read over is opened with it too, so that one setting covers
+// both.
+func (c *Client) HTTP() *http.Client { return c.http() }
 
 // do sends a request to path, with the account's token, and returns the
 // body. Protobuf routes take and answer with protobuf; the others JSON.

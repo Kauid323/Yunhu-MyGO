@@ -41,8 +41,9 @@ func (a *App) convPanel(c *ui.Context, width float32) {
 				ui.Icon(c, iconPlus).FontSize(14).TextColor(qq.textMuted)
 			})
 			if plus.Clicked() {
-				a.refreshConversations()
+				a.convPlus.open = !a.convPlus.open
 			}
+			showMenu(c, plus, &a.convPlus)
 		})
 
 		convs := a.filteredConvs()
@@ -115,5 +116,10 @@ func (a *App) convRow(c *ui.Context, conv yh.Conversation) {
 	if row.DoubleClicked() && a.prefs.Mode == modeEfficient {
 		a.open(conv)
 		a.openChatWindow()
+	}
+	// A right press asks what can be done with the chat rather than
+	// opening it, and the menu comes out of where it was pressed.
+	if row.RightClicked() {
+		a.openConvMenu(conv, row.Bounds())
 	}
 }

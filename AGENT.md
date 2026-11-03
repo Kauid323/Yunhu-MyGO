@@ -55,6 +55,7 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
 │   │   ├── decode_ws.go    推送帧与流式片段的解码
 │   │   ├── expression.go   收藏表情（JSON 路由）
 │   │   ├── profile.go      用户资料（protobuf 路由）
+│   │   ├── search.go       聊天记录搜索（JSON 路由）
 │   │   ├── errors.go       错误种类（只有码，没有文案）
 │   │   └── session.go      本机会话文件
 │   ├── i18n/               界面文案（按语言分文件，不绘制）
@@ -64,6 +65,7 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
 │   └── app/                界面
 │       ├── app.go          App 状态、窗口生命周期
 │       ├── session.go      登录 / 登出
+│       ├── login.go        登录面板的动作：再登录、加账号、代理、外链
 │       ├── live.go         服务端推送
 │       ├── convs.go        会话列表状态
 │       ├── chat.go         当前会话状态
@@ -81,6 +83,9 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
 │       ├── prefs.go        设置的值（读写配置目录、切换布局、外观、文件夹）
 │       ├── stickers.go     表情面板（拉收藏、点着发）
 │       ├── usercard.go     用户卡片（点头像开、问 /v1/user/get-user）
+│       ├── searchwin.go    聊天记录搜索窗口的状态与请求
+│       ├── view_search.go  聊天记录搜索窗口的绘制
+│       ├── datepicker.go   日期选择器（公共组件）
 │       ├── view_classic.go 经典模式：窄面板
 │       ├── chatwin.go      经典模式里单独开的聊天窗口
 │       ├── dock.go         贴边隐藏（滑到屏幕边缘、指针回来再滑出）
@@ -173,8 +178,16 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
   阴影。所以 `messageText` **不再**把 `QuoteText` 当 detail 返回——否则同一句话会
   在气泡里出现两次。
 - **时间是一条药丸**（`timeLine`，底色 `qq.timePill`），不是一行灰字：它属于整段
-  历史，不属于谁说的话。单条消息的时间是**鼠标停在那一行才出现**的（`row.Hovered()`，
-  格式 `time.stamp.full`）。
+  历史，不属于谁说的话。单条消息的时间是**鼠标在消息上停 3 秒**才出现的
+  （`stampWait` / `hoverStamp` / `stampOn`，格式 `time.stamp.full`）：
+  - 计的是**消息本身**（名字 + 气泡那一列，`AlignItems(ui.Start)` 让它贴着内容），
+    不是整行——行是列表的宽度，行上的空白不是这条消息，鼠标从旁边路过不该问出时间。
+  - 那一列必须 `AlignItems(ui.Start)`：默认的 Stretch 会让气泡跟着列变宽，短消息在
+    时间出现的一瞬间就被撑成「名字 + 时间」那么宽。
+  - 计时用 `c.Now()`（帧时钟），不是 `time.Now()`：无窗口测试里时间是假的，
+    用真实时钟的话 `Advance` 推不动它。
+  - 等待结束靠 `c.After(stampWait + 20ms)` 要一帧，那一帧自己把时间画出来；
+    不要指望鼠标不动时还有别的帧。
 - **点头像开用户卡片**（`usercard.go`）：`/v1/user/get-user`（protobuf，请求 `id`
   在字段 2）拿名字/头像/备注/签名/性别/地区。卡片画在**窗口的浮层**里，不是用
   `PopoverBase` 挂在行上——列表的行是在布局时建的，那里建的弹层会拿错皮肤，而且同一个
@@ -197,31 +210,44 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
   `openChat`——会话列表还没加载也能打开。`App.notify` 是给测试用的钩子，生产路径走
   `mygo.NewNotification`。
 
-## 6. 登录：密码 / 手机号 / Token
+## 6. 登录：面板 / 密码 / 手机号
 
-三种方式共用一张卡片，顶上一排 tab 切换（`loginMode` = `modePassword` /
-`modePhone` / `modeToken`）。原来是右下角一个「用 Token 登录」的链接，第三种方式塞
-不下了才改成 tab。
+登录是**一个自己的窗口**（320×460，`TitleBarHidden` + `HideWindowButtons`），不是聊天
+窗口里的一张卡片：两个窗口的边框不一样，而窗口的边框在创建时定死（`mainWindow`）。
+所以进出账号时窗口要**换**（`showWindow`）：`a.winLogin` 说当前是哪一个，`a.me` 说该
+是哪一个；换的时候先建新的再关旧的，否则关掉最后一个窗口会把整个应用退掉。
 
-**手机号登录是三步**（`internal/yh/login.go`）：
+面板分三页（`loginMode` = `modeAccount` / `modePassword` / `modePhone`）：
 
-1. `POST /v1/user/captcha` 取一张图（`b64s` 是 data URL，`id` 是这张图的身份）；
-2. `POST /v1/verification/get-verification-code` 交手机号 + 图上的字 + 图 id，服务端
-   才发短信；
-3. `POST /v1/user/verification-login` 用手机号 + 短信码换 token，之后和邮箱登录一样
-   （`afterLogin`）。
+- **账号页**：顶上 `app.name` 的渐变字（蓝 `#7eddfe` + 粉 `#daaaff`，`loginWordmark`）、
+  100 的圆脸、名字 + 箭头、自动登录、登录按钮、底部「账密登录 | 注册账号」。
+  名字和脸取自 session 里的 `Name` / `Avatar`——**退出登录不删账号**，只清 token
+  （`logout` 存回一个没有 token 的 session），所以面板上还是那个账号。
+- **密码页**：80 的圆脸、账号框（右边箭头开账号列表）、密码框、自动登录 + 记住密码、
+  按钮、协议行、底部「手机号登录 | 注册账号」。
+- **手机页**：三步和以前一样（验证图 → 短信码 → 换 token），只是排进了 320 宽：
+  号码框、[验证图字段 | 图]、[验证码字段 | 发送按钮]。这页比密码页多一行，所以脸缩到
+  64、行距收紧（`loginForm` 里的 `first/gap/...`）。
 
 几条规矩：
 
-- **一张图只能读一次。** 发送成功、或者服务端拒了（`APIError`，图被用掉了），都要
-  重新取一张（`fetchCaptcha`）；纯网络错误不换，图还在。
-- **60 秒才能再发一条**（`smsWait` / `smsLeft`），按钮上直接倒计时（`login.resend`），
-  倒计时期间用 `c.After(time.Second)` 每秒要一帧——不要在绘制里等。
-- **图不按固定尺寸画。** 接口给的是 180×40，槽位 132×30，按比例塞进去
-  （`captchaW` / `captchaH`），拉满就会被压扁。
-- 登录成功后把号码存进 session（`Session.Phone`，取自 `u.Phone`）；token 失效回到
-  登录页时，只有手机号没有邮箱的账号自动切到手机号那栏，号码已经填好。
-- 文案：`login.tab*` / `login.need*` / `login.codeSent` / `err.captcha`。
+- **加号是从脸中间滑出来的**（`loginAdd` / `plusSlide`）：38 的圆，中线在脸中线右边
+  86，从 `k=0` 到 `k=1` 用 180ms 缓动，透明度、边框、缩放都跟着 k 走。它被裁在
+  **脸的中线**上（`ClipX` 的容器从脸中线开始），所以看起来是从脸里钻出来的。
+  容器 `PassThrough`，不然它会把脸的右半边挡住。
+- **悬停要记在帧尾**：`Hovered()` 读的是上一帧的位置，所以 `a.plusHover` 在画完之后
+  才更新，动画用的是上一帧的值——差一帧看不出来，但写成同一帧就会卡住不动。
+- **面板的菜单是窗口的菜单组件**（`showMenu` + `menu`，`menu.go`），不是另画一份：
+  动画、点外面关、Esc 关都是它带来的。面板窄，所以 `menu.width = 120`、
+  `menu.below = true`（挂在按钮下面，而不是像侧栏那样往上翻）。
+- **账号列表也挂在锚点上**（`PopoverBase` + `AttachTo`），不要用裸 `Absolute()`：
+  没有 Left/Top 的绝对定位会落在 (0,0)，也就是窗口左上角。
+- **面板永远是深色**：`view()` 里 `winLogin` 时 `qq = skin(true)`，输入框、滚动条
+  都跟着深色走，不然浅色主题下输入的字看不见。
+- **代理**（`prefs.Proxy` / `ProxyAt`）：`yh.Client.SetProxy` 换掉 http.Client 的
+  Transport（HTTP 走 `http.ProxyURL`，SOCKS5 走 `x/net/proxy`），WebSocket 也用同一个
+  client 拨号，所以一处设置两处生效。地址空着等于不用代理。
+- **不写别人的商标**：面板顶上写的是 `app.name`（MyGO湖），不是抄来的品牌字。
 
 ## 7. 外观
 
@@ -317,7 +343,67 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
   - 已经在边上就不再触发第二次滑出——`dock.hidden` 为真且指针不在边上时什么都不做。
 - 面板窄是它的意义所在：宽到占满屏幕就没地方可收了。
 
-## 10. 运行内存预算
+- **右键会话**弹菜单（`convmenu.go`）：置顶 / 复制群号 / 标记已读 / 打开独立聊天窗口 /
+  群消息设置 / 从消息列表中移除。
+  - 菜单还是 `menu` 组件，只是多了一个 `point` 模式：`AttachTo` 到**按下位置**上的
+    一个 1×1 空盒子，而不是某个按钮，所以它从鼠标那儿长出来。位置来自
+    `cursorPoint()` 减窗口原点——mygo 不告诉元素「按在哪个像素上」。
+  - 置顶存在 `prefs.Pinned`，排序在 `filteredConvs` 里做（`SliceStable`，只把置顶的
+    提到前面，其余保持服务端给的顺序）。
+  - 群消息设置是**就地换行**（`convMuteRows` 改 `rows`），不是再开一个菜单：弹层的
+    「打开」是 `&m.open` 的地址，换掉整个 `menu` 就等于把这个地址丢了，菜单关不掉。
+  - 移除只是从 `a.convs` 里拿掉——接口没有退群/删会话的路由，刷新一次它就回来了。
+- **右键消息**弹菜单（`msgmenu.go`）：复制 / 转发 / 收藏 / 多选 / 引用 / 删除。
+  - 收藏和多选是 `dim`（画出来但点不动）：接口没有收藏消息的路由，多选是另一套模式，
+    这一版没做。`menuItem.dim` 就是给这种「有这一行但做不了」的项用的。
+  - 转发是**就地换行**：菜单里换成前 8 个会话，点一个就 `msg-forward` 发过去。
+  - 引用是把消息记在 `a.quote` 上，输入框上方出现一条引用条（同一个 `quoteBar` 色），
+    发送时走 `SendQuoted`（`quote_msg_id` 在请求字段 8，`quote_msg_text` 在 content 字段 8）。
+  - 删除走 `/v1/msg/delete`，只对自己生效（不是撤回）。
+- **引用块不再有自己的底色**（`quoteBlock`）：一条左边的竖线（`qq.quoteBar`）+ 名字 +
+  引用的话，其余跟气泡一样。之前那个灰底方块等于气泡里套了个盒子。
+- **搜索框右边的加号**弹的是「做」的菜单（`convplus.go`）：创建群聊 / 加好友/群 /
+  创建机器人。菜单挂在按钮下面（`menu.below`），点一项就问一句名字。
+  - 问名字用的是 `ask`——一个 300 宽的卡片盖在窗口中间（遮罩 + 卡片 + 一个输入框 +
+    取消/确定），不是再开一个窗口。回车等于确定。
+  - 创建群聊走 `POST /v1/group/create-group`（protobuf：name=2，intro=3，回 group_id=2），
+    建完刷新列表；创建机器人走 `POST /v1/bot/web-edit-bot`（JSON，不带 botId 就是新建）。
+  - 加好友/群是 `dim`：接口里没有「申请加好友」的路由，画出来但点不动。
+- **群聊的顶部是「名字 (人数)」**，点它开**群卡片**（`groupcard.go`）：和用户卡片同一套
+  做法——浮在窗口上的面板（`Absolute` + 遮罩关掉），不是挂在标题上的 popup。
+  - 人数来自 `POST /v1/group/info`（protobuf：请求 group_id=2；回 data 里 name=2、
+    avatar=3、introduction=5、headcount=6、category_name=11），开群聊时拉一次，
+    拉回来之前顶部先显示没有人数。
+  - 卡片里：脸、名字、`群号 (N人)`、分类小标签、备注 / 群介绍 / 群分类三行、分享 / 发消息。
+    **群公告没有做**——接口的 GroupData 里没有这个字段（只有 introduction 和 group_code），
+    与其编一行不如不显示。
+  - 分享 = 把群号复制到剪贴板；发消息 = 关掉卡片。
+## 10. 聊天记录搜索窗口
+
+输入框左边那个钟（`iconHistory`）打开一个**单独的窗口**（660×720，`searchwin.go` +
+`view_search.go`），不是弹层：`OpenSearch` 建窗口，已经开着就 `Show` + `Focus`；
+换会话再点，`chatID` 跟着换并重新搜。
+
+- **数据是 `POST /v1/search/chat-search`**（`yh/search.go`）：`word` / `chatId` /
+  `chatType` / `type` / `size` / `time` / `direction`。`type` 是字符串：`all`、`2`
+  图片、`4` 文件、`7` 表情。**链接没有对应的 type**，所以按 `all` 拿回来再按内容里
+  有没有 `http` 过滤（`hasLink`）。
+- **返回的 `content` 是消息体原文**，大多是一小段 JSON（`{"text":"..."}` 或
+  `{"image":"..."}`），直接画会画出一堆引号和反斜杠。`splitContent` 把它拆成「说的话」
+  和「图片地址」，拆不出来就当成纯文本。
+- 搜索框是**输入完再搜**：字数变了就 `due = now + 280ms` 并 `c.After` 一帧，到点才
+  发请求（`searchLoadIfDue`），不是每敲一个字发一次。
+- 日期和发送人**在本地过滤**：日期用 `time` 参数把上界交给服务端，下界本地比；发送人
+  服务端没有，只能按名字过滤，而名字的来源就是搜出来的结果——所以「可筛选的发送人」
+  只有搜到的人，这是接口的限度，不是偷懒。
+- **两个 List 不能共用一个 `ui.ListState`**，会 panic（`a ListState shown by two
+  Lists`）。结果列表 `list`、发送人列表 `senderList` 各一个。
+- 日期选择器是**单独的公共组件**（`datepicker.go`）：`showDatePicker(c, anchor, &p,
+  onPick)`，`PopoverBase` + `AttachTo` 挂在按钮下面，所以换谁用都长一样、都从按钮上
+  长出来。三页：日 → 月 → 年，点标题往上走、点年份往下走，翻页有 120ms 的淡入
+  （`walked` + `c.After`）。今天用蓝色字，选中的那天是蓝底白字。
+
+## 11. 运行内存预算
 
 以 **RSS** 计（任务管理器里看到的那个数）：
 
@@ -339,46 +425,32 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
 - 历史靠翻页（`msgPage`），不预加载。
 - 测量：`MYGOHU_MEM=1 ./mygohu.exe`，每 5 秒打一行 heap / sys / 图片缓存字节数。
 
-## 11. 代码风格
+## 12. 代码风格
 
 - `gofmt` 必须干净，`go vet` 必须干净。
 - 注释写**为什么**，不写**是什么**。导出的标识符要有注释。
 - 不引 cgo，不引 WebView，不引前端构建链。
 - 新依赖要能在 `goproxy.cn` 上拿到，并且要说明为什么标准库不够用。
 
-## 12. 测试
+## 13. 测试
 
-- `go test ./...` 必须全绿，且**默认不联网**。
-- 需要真实接口的测试用 `MYGOHU_LIVE=1` 打开，默认 skip。
-- 界面改动配一个 `ui.NewTester` 的断言，或写一张 `shots/` 截图。
-- 截图：
-  - 无窗口快照：`go test ./internal/app -run TestSnapshot`，出图
-    `chat.png` / `chat-dark.png` / `chat-en.png` / `chat-new.png`（新消息横线）/
-    `chat-unread.png`（跳转未读按钮）/ `chat-info.png` / `menu.png` /
-    `viewer.png`（图片预览窗口）/ `login.png` / `login-dark.png` /
-    `login-phone.png`（手机号登录：验证图、倒计时）/ `settings.png` /
-    `settings-light.png`（设置窗口两套外观）/ `settings-select.png`（下拉展开）/
-    `classic.png`（经典窄面板）/ `chat-window.png`（单独开的聊天窗口）/
-    `chat-stickers.png`（表情面板）
-  - 真窗口截图：`MYGOHU_CAPTURE=shots/x.png ./mygohu.exe`（RDP 下抓屏全黑，
-    只有这个办法能看）。设置窗口是第二个窗口：
-    `MYGOHU_SETTINGS=1 MYGOHU_CAPTURE_SETTINGS=shots/settings-real.png ./mygohu.exe`
-    直接把它开出来并抓图，不用登进聊天再点菜单。
-  - **第二个窗口的抓图前要先让它自己画一帧**（`CaptureSettings` 里
-    `Invalidate` + 等一下）：抓的是最后一帧的场景，而字形图集是各窗口共用的，
-    刚被另一个窗口写过就会抓出别人的字——屏幕上没问题，只有图是坏的。
-- 开关这类带动画的东西：`AnimateTo` 的值要能在帧与帧之间断言（按下那一帧钮还在原处，
-  `Advance` 之后才过去），见 `settings_test.go`。
-- 通知、缩放这类「有副作用」的东西要有钩子才测得动：`App.notify` 收下本该弹到桌面
-  的那条通知，定时器、正文、会话 id 就能在测试里断言，不用真弹窗。
-- 走到 `afterLogin` 的测试会把 session 写进**用户自己的**配置目录，覆盖真账号：先
-  `t.Setenv("APPDATA", t.TempDir())`（Linux 再加 `XDG_CONFIG_HOME`）。设置同理：
-  `New()` 不读盘，`Start()` 才读，但 `pickPrefs` 会写，测设置时要 `t.Setenv`。
-- 贴边隐藏只能在真窗口上看：它动的是窗口位置，`ui.Tester` 没有窗口。改完用
-  `./mygohu.exe` 跑起来，鼠标移开看它收不收、移到边上看出不出来（远程会话里
-  可以用 `SetCursorPos` + `mouse_event` 模拟）。
+**这个项目不写测试文件**（`*_test.go` 已经全部删掉，别再加）。改完直接在真机上跑
+`./mygohu.exe` 看。
 
-## 13. 云湖 API 备忘
+- 抓图：`MYGOHU_CAPTURE=shots/x.png ./mygohu.exe`（远程会话里抓屏全黑，只有这个办法
+  能看）。设置窗口是第二个窗口：`MYGOHU_SETTINGS=1 MYGOHU_CAPTURE_SETTINGS=shots/x.png
+  ./mygohu.exe`。
+- **第二个窗口抓图前要先让它自己画一帧**（`CaptureSettings` 里 `Invalidate` + 等一下）：
+  抓的是最后一帧的场景，字形图集是各窗口共用的，刚被另一个窗口写过就会抓出别人的字。
+- 贴边隐藏、窗口切换这类动窗口的东西只能在真机上看：`./mygohu.exe` 跑起来，鼠标移开
+  看它收不收、移到边上看出不出来（远程会话里可以用 `SetCursorPos` + `mouse_event`
+  模拟，但**合成的鼠标事件进不到窗口里**，悬停要看的话先把指针放到目标位置再启动，
+  第一帧就会带上）。
+- 想临时把某个状态画出来（菜单开着、列表展开），加一个环境变量在 `Start` 里改状态、
+  抓完就删，别留在代码里。
+
+
+## 14. 云湖 API 备忘
 
 - 服务端 `https://chat-go.jwzhd.com`，WebSocket `wss://chat-ws-go.jwzhd.com/ws`。
 - 握手后服务端**不回 login ack**，直接推二进制帧；别等 ack 判断连上没有。

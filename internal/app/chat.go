@@ -26,12 +26,26 @@ func (a *App) open(conv yh.Conversation) {
 	}
 	a.current = conv.ChatID
 	a.currentType = conv.ChatType
+	// A group says how many are in it, which the header shows: it is
+	// asked for as the chat is opened, and the header fills in when it
+	// comes.
+	if conv.ChatType == yh.ChatGroup {
+		a.loadGroup(conv.ChatID)
+	} else {
+		a.group = nil
+	}
 	a.msgs = nil
 	a.loading = true
 	a.loadingMore = false
 	a.hasMore = false
 	a.loadedAt = 1 << 30
 	a.input = ""
+	// A message of the chat that was open is not the message the pointer
+	// is on in this one, whatever ids they happen to share.
+	a.hoverID, a.hoverAt, a.stampID = "", time.Time{}, ""
+	// A message of the chat that was open is not the one being answered
+	// in this one.
+	a.quote = nil
 	// What was unread is remembered before the list is told it is read:
 	// it is where the chat opens, and where the line across the history
 	// goes.
@@ -220,6 +234,10 @@ func (a *App) send() {
 	}
 	a.input = ""
 	chatID, chatType := a.current, a.currentType
+	// The message being answered, if there is one: it is sent with the
+	// text, and the field stops answering it once it has gone.
+	quoted := a.quote
+	a.quote = nil
 	pending := &yh.Message{
 		MsgID:       "local-" + yh.NewID(),
 		Sender:      yh.Sender{ChatID: a.me.ID, Name: a.me.Name, AvatarURL: a.me.AvatarURL, ChatType: yh.ChatUser},
@@ -228,11 +246,21 @@ func (a *App) send() {
 		TimestampMS: uint64(time.Now().UnixMilli()),
 		Pending:     true,
 	}
+	if quoted != nil {
+		pending.Content.QuoteText = quoteTextOf(quoted)
+	}
 	a.msgs = append(a.msgs, pending)
 	a.jumpToEnd = true
 
 	go func() {
-		sent, err := a.client.SendText(chatID, chatType, text)
+		var sent *yh.Message
+		var err error
+		if quoted != nil {
+			sent, err = a.client.SendQuoted(chatID, chatType, text, quoted.MsgID,
+				pending.Content.QuoteText)
+		} else {
+			sent, err = a.client.SendText(chatID, chatType, text)
+		}
 		a.update(func() {
 			for i, m := range a.msgs {
 				if m.MsgID != pending.MsgID {

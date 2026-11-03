@@ -32,18 +32,27 @@ func (a *App) resume() {
 	go func() {
 		u, err := a.client.LoginToken(s.Token)
 		if err != nil {
+			// The token has gone: the account is asked for again, with
+			// what is known about it already filled in.
 			a.update(func() {
 				a.busy = false
 				a.note = line{}
 				a.errText = say("login.expired")
-				// The account that was signed in is the one coming
-				// back: a number with no email behind it is signed in
-				// with again the way it was, with the number already
-				// typed in.
-				if s.Phone != "" && s.Email == "" {
+				switch {
+				case s.Email != "":
+					a.loginMode = modePassword
+				case s.Phone != "":
 					a.loginMode = modePhone
+				default:
+					a.loginMode = modeAccount
 				}
 			})
+			// A password that was kept signs in without asking, which is
+			// what asking to be remembered is for.
+			if s.Email != "" && s.Password != "" {
+				a.password = s.Password
+				a.login()
+			}
 			return
 		}
 		a.afterLogin(u)
@@ -59,13 +68,10 @@ func (a *App) afterLogin(u *yh.User) {
 		a.errText = line{}
 		a.note = say("login.restored")
 	})
-	_ = yh.SaveSession(&yh.Session{
-		Token:    a.client.Token,
-		Email:    u.Email,
-		Phone:    u.Phone,
-		DeviceID: a.client.DeviceID,
-		Base:     a.client.Base,
-	})
+	a.saveSession(u)
+	// The panel has done its work: the window it is in makes way for the
+	// chat's own, which is the other size and has a title bar.
+	a.update(func() { a.showWindow() })
 	a.loadProfile()
 	a.refreshConversations()
 	a.connect(u.ID)
@@ -254,6 +260,15 @@ func (a *App) loginWithPhone() {
 
 // logout forgets the session and shows the sign-in screen.
 func (a *App) logout() {
+	kept := yh.Session{DeviceID: a.client.DeviceID}
+	if a.remembered != nil {
+		// The account is still known after it has been left: the panel
+		// shows its face, and signing in again is a press rather than a
+		// form. What is forgotten is the way in.
+		kept.Email, kept.Phone = a.remembered.Email, a.remembered.Phone
+		kept.Name, kept.Avatar = a.remembered.Name, a.remembered.Avatar
+		kept.Base = a.remembered.Base
+	}
 	a.update(func() {
 		a.screen = screenLogin
 		a.me = nil
@@ -268,6 +283,9 @@ func (a *App) logout() {
 		a.smsCode, a.phoneCode = "", ""
 		a.captchaID, a.captcha = "", nil
 		a.smsAt = time.Time{}
+		a.loginMode = modeAccount
+		a.loginMenu.open, a.loginProxy, a.loginAccounts = false, false, false
+		a.password = ""
 	})
 	if a.cancel != nil {
 		a.cancel()
@@ -283,6 +301,10 @@ func (a *App) logout() {
 		if token != "" {
 			_ = a.client.Logout()
 		}
-		_ = yh.ClearSession()
+		_ = yh.SaveSession(&kept)
 	}()
+	a.remembered = &kept
+	// The chat's window makes way for the panel's, which is the other
+	// size and has no title bar of the desktop's.
+	a.update(func() { a.showWindow() })
 }

@@ -70,11 +70,23 @@ type prefs struct {
 	// GroupMute is how each chat is taken: "notify", "quiet" or "blocked",
 	// by chat id. A chat that is not here is taken as "notify".
 	GroupMute map[string]string `json:"groupMute"`
+	// Pinned is the chats kept at the top of the list, by chat id.
+	Pinned map[string]bool `json:"pinned"`
 
 	// The sign-in page.
 	AutoStart  bool `json:"autoStart"`
 	AutoLogin  bool `json:"autoLogin"`
 	QuickLogin bool `json:"quickLogin"`
+	// Remember keeps the password beside the session, so that signing in
+	// again after the token has gone does not ask for it.
+	Remember bool `json:"remember"`
+	// Proxy is how the requests leave this machine: "" for the direct
+	// way, or "http" or "socks5" at ProxyAt ("127.0.0.1:7890").
+	Proxy   string `json:"proxy"`
+	ProxyAt string `json:"proxyAt"`
+	// Terms is whether the sign-in panel's agreement has been ticked: the
+	// button of the form does not send an account that has not agreed.
+	Terms bool `json:"terms"`
 
 	// Hotkeys are the keys the window answers to, by what they do: a key
 	// name as the page writes it, "" for none.
@@ -118,8 +130,12 @@ func defaultPrefs() prefs {
 		Taskbar:       true,
 		CloseTo:       "tray",
 		QuickLogin:    true,
+		AutoLogin:     true,
+		Remember:      true,
+		Terms:         true,
 		Hotkeys:       map[string]string{},
 		GroupMute:     map[string]string{},
+		Pinned:        map[string]bool{},
 	}
 }
 
@@ -263,7 +279,7 @@ func (a *App) openHelp() {
 // the classic panel is narrow because a chat is not in it, and the
 // efficient one holds the chat beside the list.
 func (a *App) applyMode() {
-	if a.win == nil || a.win.IsDestroyed() {
+	if a.win == nil || a.win.IsDestroyed() || a.winLogin {
 		return
 	}
 	if a.prefs.Mode == modeClassic {
