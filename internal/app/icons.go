@@ -32,6 +32,9 @@ var (
 	iconCalendar     = icon(`<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>`)
 	iconChevronRight = icon(`<path d="M9 5l7 7-7 7"/>`)
 	iconChevronLeft  = icon(`<path d="M15 5l-7 7 7 7"/>`)
+	// iconRecall is a message taken back: an arrow that turns round to where
+	// it came from.
+	iconRecall = icon(`<path d="M9.5 14.5L5 10l4.5-4.5"/><path d="M5 10h7.5a5.5 5.5 0 0 1 0 11H11"/>`)
 
 	// The menu's own: the quick actions across its top, then its rows.
 	iconBookmark   = icon(`<path d="M6 3.5h12v17l-6-4.5-6 4.5z"/><path d="M12 8l.9 1.9 2.1.3-1.5 1.5.4 2.1-1.9-1-1.9 1 .4-2.1-1.5-1.5 2.1-.3z"/>`)
@@ -62,6 +65,11 @@ var (
 	iconInfo       = icon(`<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.6h.01"/>`)
 	iconBell       = icon(`<path d="M18 8.5a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16s-2-1.5-2-6.5z"/><path d="M13.7 19a2 2 0 0 1-3.4 0"/>`)
 
+	// iconText / iconMarkdown / iconHTML are the three ways a message may
+	// be written, as the format button says which one the next text is.
+	iconText     = icon(`<path d="M4 6h16M4 11h16M4 16h11"/>`)
+	iconMarkdown = icon(`<path d="M3.5 8v8M3.5 16l3-4 3 4V8"/><path d="M14.5 9v7M12.5 13l2 3 2-3"/>`)
+	iconHTML     = icon(`<path d="M9 7.5l-4 4.5 4 4.5M15 7.5l4 4.5-4 4.5"/>`)
 	iconEmoji    = icon(`<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5h.01M15 9.5h.01"/>`)
 	iconScissors = icon(`<circle cx="6.5" cy="6.5" r="2.5"/><circle cx="6.5" cy="17.5" r="2.5"/><path d="M20 4L8.5 15.5M14.5 14.5L20 20M8.5 8.5L12 12"/>`)
 	iconImage    = icon(`<rect x="3" y="4.5" width="18" height="15" rx="2.4"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M21 15.5l-4.6-4.6L6 21"/>`)
@@ -69,8 +77,14 @@ var (
 	iconAt       = icon(`<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 5.2 2A9 9 0 1 0 18 19.7"/>`)
 	iconHistory  = icon(`<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3 4v4.5h4.5"/><path d="M12 8v4.5l3 1.8"/>`)
 	iconChevron  = icon(`<path d="M6 9l6 6 6-6"/>`)
-	iconSend     = icon(`<path d="M21 3L10.5 13.5M21 3l-6.8 18-3.7-7.5L3 9.8z"/>`)
-	iconLogout   = icon(`<path d="M9 21H5.5A1.5 1.5 0 0 1 4 19.5v-15A1.5 1.5 0 0 1 5.5 3H9"/><path d="M16 16.5l4.5-4.5L16 7.5"/><path d="M20.5 12H9"/>`)
+	// iconChevronUp is the send button's arrow while its menu is open:
+	// the arrow turns to point at the menu it opened.
+	iconChevronUp = icon(`<path d="M6 15l6-6 6 6"/>`)
+	// iconChevronsDown is the pair of arrows over the foot of the history:
+	// there are messages further down that have not been seen yet.
+	iconChevronsDown = icon(`<path d="M5 6l7 6 7-6"/><path d="M5 12l7 6 7-6"/>`)
+	iconSend      = icon(`<path d="M21 3L10.5 13.5M21 3l-6.8 18-3.7-7.5L3 9.8z"/>`)
+	iconLogout    = icon(`<path d="M9 21H5.5A1.5 1.5 0 0 1 4 19.5v-15A1.5 1.5 0 0 1 5.5 3H9"/><path d="M16 16.5l4.5-4.5L16 7.5"/><path d="M20.5 12H9"/>`)
 )
 
 // iconFill parses the same shapes as icon, filled rather than stroked: what
@@ -89,4 +103,9 @@ var (
 	iconFolderFill   = iconFill(`<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h9A1.5 1.5 0 0 1 21 10v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18z"/>`)
 	iconGridFill     = iconFill(`<rect x="3" y="3" width="7.5" height="7.5" rx="1.8"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.8"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.8"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.8"/>`)
 	iconBellFill     = iconFill(`<path d="M18 8.5a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16s-2-1.5-2-6.5z"/><path d="M13.7 19a2 2 0 0 1-3.4 0" fill="none"/>`)
+
+	// iconPenguinSilhouette is the mascot silhouette shown on the empty chat screen.
+	iconPenguinSilhouette = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" fill="currentColor">` +
+		`<path d="M50 14 C36 14 30 22 30 36 C30 43 32 47 35 50 C25 54 18 64 16 78 C14 90 18 100 24 104 C30 108 40 110 50 110 C60 110 70 108 76 104 C82 100 86 90 84 78 C82 64 75 54 65 50 C68 47 70 43 70 36 C70 22 64 14 50 14 Z"/>` +
+		`</svg>`))
 )

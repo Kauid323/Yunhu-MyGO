@@ -104,7 +104,7 @@ func (a *App) addMessage(m *yh.Message) {
 			return
 		}
 	}
-	read := a.msgList.AtEnd() && !a.unread()
+	read := a.msgList.AtEnd()
 	a.msgs = append(a.msgs, m)
 	a.trimMessages()
 	if read {

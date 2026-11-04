@@ -20,11 +20,6 @@ func (a *App) refreshConversations() {
 			a.sortConversations()
 			a.note = line{}
 		})
-		a.update(func() {
-			if a.current == "" && len(a.convs) > 0 {
-				a.open(a.convs[0])
-			}
-		})
 	}()
 }
 

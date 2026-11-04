@@ -39,24 +39,28 @@ func (a *App) msgMenuView(c *ui.Context) {
 	showMenu(c, anchor, &a.msgMenu.menu)
 }
 
-// msgMenuRows is what the menu of a message holds. The two rows that are
-// dim are the ones this client cannot do: nothing in the API favourites a
-// message, and picking several at once is a mode of its own that is not
-// written here. They are shown dim rather than left out, as the client this
-// one copies shows what it will not do at the moment.
+// msgMenuRows is what the menu of a message holds. A message of the account's
+// own can be taken back; one that is somebody else's cannot, and the row is
+// not drawn for it at all rather than drawn and refused.
+//
+// The one row that is dim is the one this client cannot do: nothing in the
+// API favourites a message. It is shown dim rather than left out, as the
+// client this one copies shows what it will not do at the moment.
 func (a *App) msgMenuRows(m *yh.Message) menu {
-	return menu{
-		width: 150,
-		point: true,
-		rows: []menuItem{
-			{icon: iconCopy, label: "msg.copy", do: func() { a.copyMessage(m) }},
-			{icon: iconForward, label: "msg.forward", do: func() { a.msgForwardRows(m) }},
-			{icon: iconStar, label: "msg.favorite", dim: true},
-			{icon: iconCheckCircle, label: "msg.select", dim: true},
-			{icon: iconQuote, label: "msg.quote", do: func() { a.quote = m }},
-			{icon: iconTrash, label: "msg.delete", do: func() { a.deleteMessage(m) }},
-		},
+	rows := []menuItem{
+		{icon: iconCopy, label: "msg.copy", do: func() { a.copyMessage(m) }},
+		{icon: iconForward, label: "msg.forward", do: func() { a.msgForwardRows(m) }},
+		{icon: iconStar, label: "msg.favorite", dim: true},
+		{icon: iconCheckCircle, label: "msg.select", do: func() { a.startPicking(m.MsgID) }},
+		{icon: iconQuote, label: "msg.quote", do: func() { a.quote = m }},
 	}
+	if m.Mine(a.me.ID) && m.RecalledAt == 0 {
+		rows = append(rows, menuItem{icon: iconRecall, label: "msg.recall",
+			do: func() { a.recallMessages([]*yh.Message{m}) }})
+	}
+	rows = append(rows, menuItem{icon: iconTrash, label: "msg.delete",
+		do: func() { a.deleteMessage(m) }})
+	return menu{width: 150, point: true, rows: rows}
 }
 
 // msgForwardRows puts the chats a message can be sent on to in place of the
@@ -135,8 +139,13 @@ func (a *App) deleteMessage(m *yh.Message) {
 }
 
 // rightClickMessage opens the menu of a message when the row it is drawn in
-// is pressed with the secondary button.
+// is pressed with the secondary button. While the history is being picked
+// from there is no menu: a press chooses, and the bar is where the actions
+// are.
 func (a *App) rightClickMessage(m *yh.Message, row ui.Element) {
+	if a.picking {
+		return
+	}
 	if row.RightClicked() {
 		a.openMsgMenu(m, row.Bounds())
 	}

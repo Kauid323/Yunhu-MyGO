@@ -19,11 +19,16 @@ const (
 	ContentMarkdown = 3
 	ContentFile     = 4
 	ContentForm     = 5
+	ContentPost     = 6
 	ContentSticker  = 7
 	ContentHTML     = 8
 	ContentTip      = 9
-	ContentAudio    = 11
-	ContentCall     = 13
+	// ContentVideo is a clip sent in a chat. The number is the client's
+	// own: the route's comment lists the others and leaves this one out,
+	// but a video that comes back from the server carries 10.
+	ContentVideo = 10
+	ContentAudio = 11
+	ContentCall  = 13
 )
 
 // Status is the code and message every response carries.

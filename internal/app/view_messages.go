@@ -15,16 +15,16 @@ import (
 // new day whatever the silence.
 const gapLine = 5 * time.Minute
 
-// messageList is the conversation's history, with the button that goes to
-// what has not been read over its top. Older messages come in by
-// themselves as the reader goes back through it.
+// messageList is the conversation's history, with the pill over its foot
+// that says how many messages are still below what has been seen. Older
+// messages come in by themselves as the reader goes back through it.
 func (a *App) messageList(c *ui.Context) {
-	// The button is placed against the list rather than against the
-	// window, so that it sits over the top of the history whatever is
-	// above it.
+	// The pill is placed against the list rather than against the window,
+	// so that it sits over the foot of the history whatever is below it.
 	ui.Box(c).Grow(1).Children(func() {
 		a.messages(c)
 		a.jumpToUnread(c)
+		a.pickBar(c)
 	})
 }
 
@@ -134,10 +134,12 @@ func (a *App) messageRow(c *ui.Context, m *yh.Message, i int) {
 	if m.Mine(a.me.ID) {
 		row := ui.Row(c)
 		row.Children(func() {
+			a.pickBox(c, m)
 			ui.Spacer(c)
 			a.bubble(c, m)
 		})
 		a.rightClickMessage(m, row)
+		a.rowPress(m, row)
 		a.flashRow(c, m, row)
 		return
 	}
@@ -152,6 +154,7 @@ func (a *App) messageRow(c *ui.Context, m *yh.Message, i int) {
 	var col ui.Element
 	row := ui.Row(c).Gap(9).AlignItems(ui.Start)
 	row.Children(func() {
+		a.pickBox(c, m)
 		a.messageAvatar(c, m.Sender, 32)
 		col = ui.Column(c).MaxWidth(540).Gap(4).AlignItems(ui.Start)
 		col.Children(func() {
@@ -169,8 +172,13 @@ func (a *App) messageRow(c *ui.Context, m *yh.Message, i int) {
 			a.bubble(c, m)
 		})
 	})
-	a.hoverStamp(c, m, col)
-	a.rightClickMessage(m, row)
+	// The time of a message and the menu of it are for reading, not for
+	// picking: while the history is being picked from, a press chooses.
+	if !a.picking {
+		a.hoverStamp(c, m, col)
+		a.rightClickMessage(m, row)
+	}
+	a.rowPress(m, row)
 	a.flashRow(c, m, row)
 }
 
@@ -289,27 +297,46 @@ func newLine(c *ui.Context) {
 	})
 }
 
-// jumpToUnread is the button over the top of the list: how many messages
-// are still unread below what is in view, and the way to them.
+// jumpToUnread is the pill over the bottom right of the history, as QQ
+// has it: a down arrow and the number of messages still below what has
+// been seen. It sits over the foot of the list rather than its top,
+// because what it points at is further down. The number drops by one for
+// each row that comes into view, so scrolling through the unread ones
+// counts them off rather than holding a total that never changes. Pressing
+// it jumps to the very bottom.
 func (a *App) jumpToUnread(c *ui.Context) {
+	if a.picking {
+		return
+	}
 	n := a.unreadBelow()
 	if n <= 0 {
 		return
 	}
-	box := ui.Row(c).Absolute().Top(10).Right(16).Height(26).Padding(0, 10).
-		Radius(13).Gap(3).AlignItems(ui.Center).Background(qq.menuBg).
+	box := ui.Row(c).Absolute().Bottom(14).Right(16).Height(28).Padding(0, 14).
+		Radius(14).Gap(5).AlignItems(ui.Center).Background(qq.menuBg).
 		Border(1, qq.menuLine).Shadow(0, 2, 8, 0, ui.RGBA(0, 0, 0, 0.16)).
 		Cursor(ui.CursorPointer)
 	if box.Hovered() {
 		box.Background(qq.menuHover)
 	}
 	box.Children(func() {
-		ui.Icon(c, iconChevron).FontSize(12).TextColor(qq.accent)
-		ui.Text(c, i18n.T("chat.newMessages", i18n.Num(n))).
-			FontSize(11.5).TextColor(qq.accent).SingleLine()
+		ui.Icon(c, iconChevron).FontSize(13).TextColor(qq.accent)
+		text := i18n.Num(n)
+		if n > 99 {
+			text = "99+"
+		}
+		ui.Text(c, text).FontSize(12).TextColor(qq.accent).SingleLine()
 	})
 	if box.Clicked() {
-		a.jumpTo = a.unreadFrom
+		if a.hasNewer {
+			a.hasNewer = false
+			a.jumpToEnd = true
+			a.loadMessages(a.current, a.currentType)
+		} else {
+			a.msgList.ScrollToEnd()
+			a.jumpToEnd = true
+			a.readFrom = len(a.msgs)
+		}
 	}
 }
 
@@ -328,8 +355,23 @@ func (a *App) bubble(c *ui.Context, m *yh.Message) {
 			return
 		}
 	}
+	// A picture that is still on its way has no address to be fetched from
+	// yet: it shows the room it will take rather than a word for a message
+	// nobody can read.
+	if m.Pending && m.ContentType == yh.ContentImage {
+		a.pendingPicture(c, m)
+		return
+	}
+	if m.Pending && m.ContentType == yh.ContentVideo {
+		a.pendingVideo(c, m)
+		return
+	}
 	if url := pictureURL(m); url != "" {
 		a.picture(c, m, url, text)
+		return
+	}
+	if m.ContentType == yh.ContentVideo || m.Content.VideoURL != "" {
+		a.videoBubble(c, m, bg, fg)
 		return
 	}
 	if text == "" && detail == "" {
@@ -360,6 +402,35 @@ func (a *App) bubble(c *ui.Context, m *yh.Message) {
 	if m.EditedAt > 0 {
 		ui.Text(c, i18n.T("chat.edited")).FontSize(9.5).TextColor(qq.textFaint)
 	}
+}
+
+// videoBubble is a clip in the history: its name and size beside the play
+// mark, rather than the long address it is served from. There is no player
+// in the window, so the row keeps the address for whoever opens it and
+// shows what a reader can recognise.
+func (a *App) videoBubble(c *ui.Context, m *yh.Message, bg, fg ui.Color) {
+	box := ui.Column(c).Padding(8, 12).Radius(8).Background(bg).Gap(3).MaxWidth(500)
+	box.Children(func() {
+		if q := strings.TrimSpace(m.Content.QuoteText); q != "" {
+			quoteBlock(c, q)
+		}
+		ui.Row(c).Gap(9).AlignItems(ui.Center).Children(func() {
+			ui.Icon(c, iconVideo).FontSize(21).TextColor(fg)
+			ui.Column(c).Gap(2).MaxWidth(260).Children(func() {
+				name := m.Content.FileName
+				if name == "" {
+					name = i18n.T("msg.video")
+				}
+				ui.Text(c, name).FontSize(12.5).TextColor(fg).
+					MinWidth(0).SingleLine()
+				if m.Content.FileSize > 0 {
+					ui.Text(c, i18n.T("msg.fileSize", float64(m.Content.FileSize)/1024)).
+						FontSize(10.5).TextColor(fg).Opacity(0.75).SingleLine()
+				}
+			})
+		})
+		a.bubbleState(c, m, fg, 0)
+	})
 }
 
 // quoteBlock is the message a message answers, above what it says: who said

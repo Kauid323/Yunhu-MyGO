@@ -9,6 +9,7 @@ import "errors"
 // A failure the server explained itself is an *APIError, whose message is
 // the server's own and is shown as it came.
 var (
+	ErrRequest   = errors.New("the request could not be made")
 	ErrNetwork   = errors.New("the request did not go through")
 	ErrResponse  = errors.New("the answer could not be read")
 	ErrStatus    = errors.New("the answer was not a success")

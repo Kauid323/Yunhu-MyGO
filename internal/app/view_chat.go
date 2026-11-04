@@ -7,6 +7,14 @@ import (
 	"mygohu/internal/yh"
 )
 
+// emptyPane is drawn when no conversation is open: a quiet screen with
+// the mascot's silhouette in its center, as QQ shows it.
+func (a *App) emptyPane(c *ui.Context) {
+	ui.Column(c).Grow(1).FillHeight().Center().Background(qq.chatBg).Children(func() {
+		ui.Icon(c, iconPenguinSilhouette).FontSize(110).TextColor(qq.emptySilhouette)
+	})
+}
+
 // chatPane is the open conversation: its header, its messages and the
 // composer.
 func (a *App) chatPane(c *ui.Context) {

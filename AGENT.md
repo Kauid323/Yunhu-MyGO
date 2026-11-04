@@ -156,9 +156,9 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
   `Unread` 反推，往前翻页时跟着平移），横线画在它上面；`readFrom` 是「读到哪儿」
   的游标，只增不减（`markRead`）。**进会话就是在读**，所以往回翻历史不会把已读的
   又算成未读。
-- **跳转按钮数的是 `len(msgs) - readFrom`**（`unreadBelow`）：往下滚就减少，滚到
-  底就是 0，按钮消失；点一下回到 `unreadFrom`（`jumpTo` 在列表构建时消费，不能
-  在构建之后滚，否则要等下一帧）。
+- **跳转按钮数的是 `len(msgs) - readFrom`**（`unreadBelow`，位于消息区右下角）：
+  随着视口最后可见行向下滚动逐条递减（划过一条少一条），滚到底为 0 消失；
+  点一下跳转到最底部（`ScrollToEnd`）并将当前消息全部标记为已读（有更后消息时拉取最新页）。
 - **往前翻到八成自动续**（`wantMore` / `farBack`）：看到的第一行落在最上面五分之一
   里（`first <= rows/5`）就再要一页。三道闸：
   - `hasMore`：服务器说没有了就不再问；
@@ -180,6 +180,7 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
   真的加进来了 id 才会变，不然一帧一页会把整段历史抽干。
 - **两边气泡同色**（`bubbleOther`）。谁说的由**位置**区分（自己在右、别人在左带头像和
   名字），不靠颜色——自己那侧没有第二种底色，`palette` 里也没有 `bubbleMine`。
+- **未打开会话 / 再次点击进入清屏**（`emptyPane` / `clearChat`）：默认未联网拉取数据或没有打开会话时（`a.current == ""`），右侧区域为清屏状态（居中绘制企鹅剪影水印 `iconPenguinSilhouette`，无聊天标题栏与输入框）；已打开的会话再次点击执行 `clearChat` 取消选中并回到清屏。
 - **图片和表情不加气泡。** 气泡是给文字的，给照片套框就是加相框。表情的图在
   `msg_content.image`，可能是相对路径，要补 `https://chat-img.jwznb.com/`
   （`stickerURL`）。
@@ -232,7 +233,9 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
 
 登录是**一个自己的窗口**（320×460，`TitleBarHidden` + `HideWindowButtons`），不是聊天
 窗口里的一张卡片：两个窗口的边框不一样，而窗口的边框在创建时定死（`mainWindow`）。
-所以进出账号时窗口要**换**（`showWindow`）：`a.winLogin` 说当前是哪一个，`a.me` 说该
+启动时若已有保存的会话（`Token != ""` 且自动登录），直接进入主界面并使用会话信息预置 `a.me`，
+后台静默刷新验证 token（`resume`），不会先闪现登录面板；只有未登录或 token 失效时才展示登录窗口。
+进出账号时窗口要**换**（`showWindow`）：`a.winLogin` 说当前是哪一个，`a.me` 说该
 是哪一个；换的时候先建新的再关旧的，否则关掉最后一个窗口会把整个应用退掉。
 
 面板分三页（`loginMode` = `modeAccount` / `modePassword` / `modePhone`）：
@@ -529,18 +532,32 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
   一页 30 条，**没有 count 参数**；用来补跳转之后下半截的历史。
 - 发消息的响应是包了一层的 `StatusResponse`，`code == 1` 才是成功。
 - 图片 CDN 有防盗链，必须带 `Referer: https://chat-go.jwzhd.com`，否则 403。
-- 消息内容类型：1 文本、2 图片、3 Markdown、4 文件、5 表单、7 表情、8 HTML、
-  9 提示、11 语音、13 通话。
+- 消息内容类型：1 文本、2 图片、3 Markdown、4 文件、5 表单、6 文章、7 表情、
+  8 HTML、9 提示、**10 视频**、11 语音、13 通话。10 不在 proto 注释的那串里，
+  但官方客户端 `MessageItem.CONTENT_TYPE_VIDEO = 10`，实测发得出去，服务端回的
+  视频消息也是 10。
 - 表情消息的图在 `msg_content.image`（可能是 `expression/xxx.png` 这样的相对路径，
   补 `https://chat-img.jwznb.com/`）；`expression_id` 是 proto 里的 **str**，
   服务端不校验，`sticker_item_id` / `sticker_pack_id` 是表情包那一套。光靠 id
   取不到图，别拿 id 当地址拼。
 - 收藏表情列表 `POST /v1/expression/list`（JSON，不是 protobuf）：`data.expression[]`
   里每项 `id`（数字）+ `url`（相对路径）。发的时候 `expression_id` 要**转成字符串**。
-- 上传是七牛那一套，还没接：`/v1/misc/qiniu-token`（图片）/ `-audio` / `-video` /
-  `qiniu-token2`（文件）拿上传 token，再按 token 里的 ak/bucket 查
-  `https://api.qiniu.com/v4/query?ak=&bucket=` 得到上传 host，直传后把返回的 key
-  填进 `msg_content.image_url` / `file_key` / `video` / `audio`。
+- 上传走七牛那一套，已接在 `internal/yh/upload.go`：
+  `GET /v1/misc/qiniu-token`（图片）/ `qiniu-token2`（文件）/ `-audio` / `-video`
+  拿 token，响应是 **JSON**（`code == 1`、`data.token`）；从 token 冒号前取 ak，
+  查 `https://api.qiniu.com/v4/query?ak=&bucket=`（`hosts[].up.domains[0]`）拿上传
+  host，问不到就退回到已知 host。**multipart 三个字段**：`token`、`key`、
+  `file`（文件名用原名）。`key = md5(字节) + "." + 扩展名`，同一张图发两次只存一份。
+  key 不是地址：展示时补 host——图片 `https://chat-img.jwznb.com/`、文件
+  `https://chat-file.jwznb.com/`、语音 `…audio1…`、视频 `…video1…`（`MediaURL`）。
+- 视频 bucket 有 `mimeLimit`，按**文件内容魔数**判类型，不看 part 的
+  `Content-Type`：官方客户端 part 也写 `application/octet-stream`。传一段文本改名
+  `.mp4` 会被拒 `limited mimeType: application/octet-stream is forbidden`，
+  真 mp4（开头 `ftyp` box）就过。视频扩展名只放行
+  `mp4/avi/mov/mkv/flv/wmv/3gp`。
+- `chat-video1.jwznb.com` 对匿名 GET 一律 403（`X-Error-Detail: WTR`，各种
+  Referer 都不行），图片 host 同样 Referer 是 200。所以客户端**不下载视频**，
+  气泡只画图标 + 文件名 + 大小；服务端回的 `video_url` 是完整地址，另说。
 - 连接状态（`yh.State`）只是码：`online` / `retrying` / `offline`，文字在界面层。
 - 手机号登录：`/v1/user/captcha` 给 `data.b64s`（`data:image/png;base64,…`，前缀也
   可能写成 `image//png;base64,`，所以只认 `base64,` 之后的部分）+ `data.id`，图是
@@ -548,3 +565,81 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
   `mobile` / `code`（图上的字）/ `id`（图的 id）/ `platform`；
   `/v1/user/verification-login` 的字段是 `mobile` / **`captcha`（短信码，不叫 code）**
   / `deviceId` / `platform`。图读错了返回 `code:-1`「图文验证码验证失败」。
+
+## 15. 聊天界面功能（输入框、右键菜单、多选、@）
+
+网络层在 `internal/yh`，绘制在 `view_*.go`，状态在 `app.go` / 各域文件；后台
+改动一律走 `a.update(...)` 回到界面。原生文件对话框（`mygo.Dialog.Open`、
+上传、发消息）都在 goroutine 里，**别在绘制线程上等**。
+
+- 发消息 `POST /v1/msg/send-message` 的 protobuf：外层 `msg_id=2`、`chat_id=3`、
+  `chat_type=4`、`content=5`（嵌套消息）、`content_type=6`、`quote_msg_id=8`、
+  **`media=9`**；content 里 `text=1`、`mentioned_id=6`（**repeated**，一个人一条）、
+  `quote_msg_text=8`、图片 key `=9`（不是 3）、`file_name=4`、`file_key=5`、
+  `file_size=18`、**`video=19`**、`audio=21`、`audio_time=22`、
+  `width=33`、`height=34`。`media` 是发给图片/音频/视频用的嵌套：
+  `file_key=1`、`file_hash=2`、`file_type=3`（`video/mp4`）、`image_height=5`、
+  `image_width=6`、`file_size=7`、`file_key2=8`（同 key，不写据说会报错）、
+  `file_suffix=9`。响应是包一层的 `StatusResponse`。
+  发视频要 `content.video=19` + `content_type=10` + `media=9` 三样齐，
+  光给 key 播放器没东西可开。`SendText` / `SendQuoted` 都收一个 `kind`
+  （1 文本 / 3 Markdown / 8 HTML），`SendKind(0)` 归一成文本。
+- 撤回 `POST /v1/msg/recall-msg`：`msg_id=2` **repeated**（一次可撤多条）、
+  `chat_id=3`、`chat_type=4`。撤回只对**自己发的、没撤过的**消息显示（`Mine` +
+  `RecalledAt == 0`）；撤回成功后就地打 `RecalledAt`，行还在、内容变「已撤回」。
+  删除 `/v1/msg/delete`（JSON）只删自己的，不是撤回。转发
+  `/v1/msg/msg-forward`（JSON，`receive: [{chatId,chatType}]`）。
+- 群成员 `POST /v1/group/list-member`：外层 `Data{size=1,page=2}` 嵌在 field 2、
+  `group_id=3`；响应 `users` repeated field 2，每人嵌套 `UserInfo`
+  （`user_id=1`、`name=2`、`avatar_url=4`、`permission_level=3` 在外层，
+  100 群主 / 2 管理员）。只取第一页 100 人，@ 靠输入名字筛。
+- **@ 群成员**：输入框 `@` 按钮开面板 → 名字写进 `a.input`（`@名字 `），
+  账号存在 `a.named`。发送时 `namedIn(text)` 按**文本里是否还有 `@名字`** 算
+  `mentioned_id`，`forgetNamed(text)` 把删掉的名字忘掉——别拿面板里点过的名单当准，
+  用户会把名字删掉。
+- **发图 / 视频 / 发文件**：`pick` 在 goroutine 里开对话框，选中即插一条
+  `Pending` 本地消息（图片 `pendingPicture`、视频 `pendingVideo` 占位），后台
+  `UploadImage/UploadVideo/UploadFile` → `SendImage/SendVideo/SendFile`，成功后
+  **用 `a.msgs[i] = sent` 把那条替换掉**，失败 `failAttach` 标 `Failed`。
+  `isVideoName` / `isImageName` 按扩展名分三路（视频优先，bucket 不同）；
+  图片宽高用 `image.DecodeConfig` 只读头，不整份解码。视频气泡不显示长 URL，
+  只画图标 + 文件名 + 大小（`videoBubble`）。
+- **发送格式**：工具栏一个「文本 / Markdown / HTML」按钮（`formatButton` +
+  `sendFormatMenu`，用现成的 `showMenu`），选中写 `a.sendType`，按钮高亮显示当前
+  格式；`send()` 把 `kind` 交给 `SendText/SendQuoted`，**发完立刻恢复文本**，换会话
+  也恢复——格式是给这一条消息的，不是设置。官方客户端是长按发送按钮选格式，
+  这里做成常驻按钮更好发现。HTML 发出去服务端会渲染，本客户端只按 `htmlText`
+  显示纯文字（已知降级）。
+- **发送按钮（照 QQ）**：`sendButton` 是**一个**蓝色圆角控件 `Height(32).Radius(10)`
+  = 实测 **94×32 px**，与 QQ 两张截图逐像素一致。左边「发送」可点（空输入时文字
+  半透明、不发送），中间 1px 竖分隔线，右边 36 宽的箭头区可点开菜单。
+  菜单打开时箭头用 `iconChevronUp`，否则 `iconChevron`。别拆成两个按钮，
+  拆开就要对齐且大小不一致。
+- 箭头后的 `sendOptionsMenu` 是 QQ 那两行「✓ 按 Enter 键发送消息 /
+  按 Ctrl + Enter 键发送消息」：选中行 `icon: iconCheck`，未选中行 **icon 留 nil**
+  （`menuRow` 会补一个 19×19 空位，两行文字才对齐）。选中写 `a.prefs.SendKey`
+  + `a.savePrefs()`，composer 里 `sends := a.prefs.SendKey != "ctrlEnter"` 当帧生效；
+  菜单每次开都重建，设置页改过也能显示对的勾。菜单宽 248，再窄会把
+  「Ctrl + Enter」截成省略号。
+- `menu` 加了 `above`：按钮在窗口底部时菜单要开在**正上方、右边缘对齐**
+  （`AnchorTopRight` / `AnchorBottomRight`），用默认锚点会跑出窗口右边。
+  **对齐**：并排的按钮必须和 `toolAction` 一样 `Height(28)` + `.Center()`。
+  `ui.Box` 只给 `Height` 不给 `Center()` 时里面的 Row 贴顶，实测带文字的格式按钮
+  比重心在 y≈556 的图标按钮高 4~5px（y≈551），看起来就是「没对齐」；
+  `.Center()` 是水平+垂直都居中（和搜索日期那次的教训同一个坑）。
+- **多选**：右键「多选」或菜单进入 `picking`，`picked map[string]bool`；
+  行内 `pickBox` 圆圈 + `rowPress` 整行可点，`pickBar` 是**底部居中的紧凑胶囊**
+  （外层 `ui.Row(...).Justify(ui.Center)` + 内层 `ui.Box`，别让条铺满整宽）。
+  批量转发 / 删除 / 撤回复用单条那套；选模式下**不弹右键菜单**。
+- 表情栏 `ui.List` 必须给**固定 `Height`**：`MaxHeight` 不成视口、会把几百行全建出来。
+  图片缓存按帧 LRU（`beginFrame` 每帧 +1，`used` 命中刷新），`fetchSem` 限并发 8，
+  `imageBudget` 24MB；当前帧在用的图不淘汰，否则刚画就被逐出、每帧重新拉取。
+
+## 16. Linux 交叉编译
+
+`GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o mygohu-linux-amd64 .`。
+产物是 **ELF64 / x86-64 / ET_EXEC**，但 `PT_INTERP` 仍是
+`/lib64/ld-linux-x86-64.so.2`——mygo 走 purego/`dlopen`，**需要 glibc，Alpine/musl
+跑不了**。运行期还要 GTK3 + WebKitGTK（`dlopen`），缺了起不来。Windows 专有能力
+（光标位置、磁盘）在 `cursor_other.go` / `disk_other.go` 里降级。每次改完功能要重编，
+否则 Linux 产物会落后于 Windows 版。

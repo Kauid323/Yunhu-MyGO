@@ -326,18 +326,36 @@ func oldestFirst(msgs []*Message) []*Message {
 	return msgs
 }
 
+// SendKind is the number the route is given for what a text is: words,
+// markdown, or markup. One that says nothing means words, which is what a
+// composer that has not been asked for a format holds.
+func SendKind(kind int) int {
+	if kind == 0 {
+		return ContentText
+	}
+	return kind
+}
+
 // SendText sends a text message, and returns it as it will show locally.
-func (c *Client) SendText(chatID string, chatType int, text string) (*Message, error) {
+// mentioned are the accounts the text names with an @: the server reads them
+// from the content, and the chat that receives the message marks those names
+// rather than showing them as words. kind is what the text is written in —
+// words, markdown, or markup — and decides who reads it as more than words.
+func (c *Client) SendText(chatID string, chatType int, text string, mentioned []string, kind int) (*Message, error) {
+	kind = SendKind(kind)
 	id := NewID()
 	var content []byte
 	content = pbString(content, 1, text)
+	for _, who := range mentioned {
+		content = pbString(content, 6, who)
+	}
 
 	var body []byte
 	body = pbString(body, 2, id)
 	body = pbString(body, 3, chatID)
 	body = pbUint(body, 4, uint64(chatType))
 	body = pbMessage(body, 5, content)
-	body = pbUint(body, 6, ContentText)
+	body = pbUint(body, 6, uint64(kind))
 
 	data, err := c.do("POST", "/v1/msg/send-message", body, true)
 	if err != nil {
@@ -349,7 +367,7 @@ func (c *Client) SendText(chatID string, chatType int, text string) (*Message, e
 	return &Message{
 		MsgID:       id,
 		ChatID:      chatID,
-		ContentType: ContentText,
+		ContentType: kind,
 		Content:     Content{Text: text},
 		TimestampMS: uint64(time.Now().UnixMilli()),
 	}, nil
@@ -383,6 +401,133 @@ func (c *Client) SendSticker(chatID string, chatType int, image, expressionID st
 		ChatID:      chatID,
 		ContentType: ContentSticker,
 		Content:     Content{Image: image},
+		TimestampMS: uint64(time.Now().UnixMilli()),
+	}, nil
+}
+
+// SendImage sends a picture to a chat: the key the bucket gave it, and the
+// size it was sent in, which the chat uses to lay the message out before the
+// picture itself is here.
+//
+// The key goes in the content's picture field rather than in the address
+// field: a message that came back from the server carries the key there and
+// the whole address in the other, so the address is what the server makes of
+// the key, and sending an address of our own would be sending it twice.
+func (c *Client) SendImage(chatID string, chatType int, key string, width, height, size int64) (*Message, error) {
+	id := NewID()
+	var content []byte
+	content = pbString(content, 9, key)
+	content = pbUint(content, 18, uint64(max(size, 0)))
+	content = pbUint(content, 33, uint64(max(width, 0)))
+	content = pbUint(content, 34, uint64(max(height, 0)))
+
+	var body []byte
+	body = pbString(body, 2, id)
+	body = pbString(body, 3, chatID)
+	body = pbUint(body, 4, uint64(chatType))
+	body = pbMessage(body, 5, content)
+	body = pbUint(body, 6, ContentImage)
+
+	data, err := c.do("POST", "/v1/msg/send-message", body, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := decodeStatusResponse(data).Err(); err != nil {
+		return nil, err
+	}
+	return &Message{
+		MsgID:       id,
+		ChatID:      chatID,
+		ContentType: ContentImage,
+		Content: Content{
+			Image:    key,
+			ImageURL: MediaURL("image", key),
+			Width:    int(width),
+			Height:   int(height),
+		},
+		TimestampMS: uint64(time.Now().UnixMilli()),
+	}, nil
+}
+
+// SendFile sends a file to a chat: the key the bucket gave it, the name it
+// had, and its size, which is what the message shows besides the name.
+func (c *Client) SendFile(chatID string, chatType int, key, name string, size int64) (*Message, error) {
+	id := NewID()
+	var content []byte
+	content = pbString(content, 4, name)
+	content = pbString(content, 5, key)
+	content = pbUint(content, 18, uint64(max(size, 0)))
+
+	var body []byte
+	body = pbString(body, 2, id)
+	body = pbString(body, 3, chatID)
+	body = pbUint(body, 4, uint64(chatType))
+	body = pbMessage(body, 5, content)
+	body = pbUint(body, 6, ContentFile)
+
+	data, err := c.do("POST", "/v1/msg/send-message", body, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := decodeStatusResponse(data).Err(); err != nil {
+		return nil, err
+	}
+	return &Message{
+		MsgID:       id,
+		ChatID:      chatID,
+		ContentType: ContentFile,
+		Content: Content{
+			FileName: name,
+			FileURL:  MediaURL("file", key),
+			FileSize: size,
+		},
+		TimestampMS: uint64(time.Now().UnixMilli()),
+	}, nil
+}
+
+// SendVideo sends a clip to a chat. The key goes in the content's video
+// field, and the same key in the media beside it: the media is what tells
+// the chat the size and the kind of the clip, and a video sent without it
+// is one the player has nothing to open. Both are the key, not an address —
+// the server makes the address of it.
+func (c *Client) SendVideo(chatID string, chatType int, key, name string, size int64) (*Message, error) {
+	id := NewID()
+	ext := uploadExt(name)
+	var content []byte
+	content = pbString(content, 19, key)
+	content = pbUint(content, 18, uint64(max(size, 0)))
+
+	var media []byte
+	media = pbString(media, 1, key)
+	media = pbString(media, 3, "video/"+ext)
+	media = pbUint(media, 7, uint64(max(size, 0)))
+	media = pbString(media, 8, key)
+	media = pbString(media, 9, ext)
+
+	var body []byte
+	body = pbString(body, 2, id)
+	body = pbString(body, 3, chatID)
+	body = pbUint(body, 4, uint64(chatType))
+	body = pbMessage(body, 5, content)
+	body = pbUint(body, 6, ContentVideo)
+	body = pbMessage(body, 9, media)
+
+	data, err := c.do("POST", "/v1/msg/send-message", body, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := decodeStatusResponse(data).Err(); err != nil {
+		return nil, err
+	}
+	return &Message{
+		MsgID:       id,
+		ChatID:      chatID,
+		ContentType: ContentVideo,
+		Content: Content{
+			VideoURL: MediaURL("video", key),
+			FileName: name,
+			FileSize: size,
+		},
 		TimestampMS: uint64(time.Now().UnixMilli()),
 	}, nil
 }

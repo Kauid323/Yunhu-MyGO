@@ -21,7 +21,7 @@ func (a *App) view(c *ui.Context) {
 	// The sign-in panel is drawn in the colours of the client it copies,
 	// in either appearance: it is looked at before there is an account to
 	// have an appearance with.
-	if a.winLogin || a.me == nil {
+	if a.winLogin {
 		qq = skin(true)
 		c.SetTheme(theme(true))
 	} else {
@@ -44,7 +44,7 @@ func (a *App) view(c *ui.Context) {
 	})
 
 	ui.Column(c).Fill().Background(qq.chatBg).Children(func() {
-		if a.winLogin || a.me == nil {
+		if a.winLogin {
 			a.loginView(c)
 			return
 		}
@@ -72,6 +72,10 @@ func (a *App) shell(c *ui.Context) {
 					ui.Text(c, i18n.T("chat.inWindow")).FontSize(12).
 						TextColor(qq.textFaint)
 				})
+			return
+		}
+		if a.current == "" {
+			a.emptyPane(c)
 			return
 		}
 		a.chatPane(c)

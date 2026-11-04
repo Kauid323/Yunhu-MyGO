@@ -130,6 +130,15 @@ type App struct {
 	msgList     ui.ListState
 	convList    ui.ListState
 	input       string
+	// sendType is what the next text is written in: words by default, or
+	// markdown / markup chosen from the format button. It goes back to
+	// words once the text has gone, as the choice was for that message.
+	sendType int
+	// formatMenu is the menu that chooses what the next text is written
+	// in, hung off the format button in the composer. sendMenu is the one
+	// behind the send button's arrow, which chooses the key that sends.
+	formatMenu menu
+	sendMenu   menu
 	// note is what went wrong with the last thing asked for, if
 	// anything did: the list under the conversations says it.
 	note        line
@@ -224,6 +233,20 @@ type App struct {
 	stickerOpen bool
 	stickerGo   bool
 	stickerList ui.ListState
+	// mention is the panel that names people in a group message: the
+	// members of the group that is open, how far down the panel has been
+	// scrolled, what is typed into it to narrow them, whether it is open,
+	// and who the text being written names.
+	mentionOpen bool
+	mentionGo   bool
+	mentionFind string
+	members     []yh.Member
+	mentionList ui.ListState
+	named       []named
+	// picking is the history being read to choose from it, and picked the
+	// messages chosen: the bar over the foot of the list acts on them.
+	picking bool
+	picked  map[string]bool
 	// space is what the app takes up on this machine, as the storage page
 	// reports it, and whether it is being measured.
 	space   space
@@ -280,6 +303,9 @@ func New() *App {
 	a.more = moreMenu(a)
 	a.loginMenu = loginMenu(a)
 	a.convPlus = newChatMenu(a)
+	a.formatMenu = sendFormatMenu(a)
+	a.sendMenu = sendOptionsMenu(a)
+	a.sendType = yh.ContentText
 	return a
 }
 
@@ -306,12 +332,33 @@ func (a *App) Start() {
 	if s, err := yh.LoadSession(); err == nil && s != nil {
 		a.remembered = s
 		a.email, a.phone = s.Email, s.Phone
+		if s.Token != "" {
+			a.client.Token = s.Token
+			if s.DeviceID != "" {
+				a.client.DeviceID = s.DeviceID
+			}
+			if s.Base != "" {
+				a.client.Base = s.Base
+			}
+			if a.prefs.AutoLogin {
+				a.me = &yh.User{
+					ID:        s.UserID,
+					Name:      s.Name,
+					AvatarURL: s.Avatar,
+					Email:     s.Email,
+					Phone:     s.Phone,
+				}
+			}
+		}
 	}
 	// The sign-in panel and the chat window are two windows: one is the
 	// size of the client it copies and has no title bar of the desktop's,
 	// and the other is not. Which one this run needs is known before
 	// either is made.
 	a.winLogin = a.remembered == nil || a.remembered.Token == "" || !a.prefs.AutoLogin
+	if a.winLogin {
+		a.me = nil
+	}
 	a.win = a.mainWindow()
 	// A notification opens the chat it is about, on the window that is
 	// already here.

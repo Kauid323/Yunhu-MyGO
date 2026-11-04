@@ -41,8 +41,11 @@ type menu struct {
 	below bool
 	// point hangs it off a place rather than off a button: a menu opened
 	// by a right press has no button to come out of, and opens from the
-	// point that was pressed.
+	// point that was pressed. above opens it straight over its button with
+	// their right edges on one line, as the send button's menu does; a
+	// button at the foot of a window has no room below it.
 	point bool
+	above bool
 	quick []menuItem
 	rows  []menuItem
 }
@@ -87,6 +90,11 @@ func showMenu(c *ui.Context, anchor ui.Element, m *menu) {
 		// it and folding back where the window has no room.
 		at, self = ui.AnchorTopLeft, ui.AnchorTopLeft
 		originX, originY = 0, 0
+	case m.above:
+		// Sitting straight above the button, right edges together: the
+		// menu rises into the room the window has over its foot.
+		at, self = ui.AnchorTopRight, ui.AnchorBottomRight
+		originX, originY = 1, 1
 	case m.below:
 		// Hanging straight down from the button's right edge, so that a
 		// menu at the top of a window opens over what is under it rather
@@ -104,7 +112,7 @@ func showMenu(c *ui.Context, anchor ui.Element, m *menu) {
 			Background(qq.menuBg).Border(1, qq.menuLine).
 			Shadow(0, 8, 22, 0, ui.RGBA(0, 0, 0, 0.30)).
 			TransformOrigin(originX, originY).Transition(arrives)
-		if !m.below && !m.point {
+		if !m.below && !m.point && !m.above {
 			panel.Left(8)
 		}
 		menuBody(c, m)
@@ -162,7 +170,14 @@ func menuRow(c *ui.Context, m *menu, it menuItem) {
 		if it.dim {
 			ink = qq.menuTextMuted
 		}
-		ui.Icon(c, it.icon).FontSize(19).TextColor(ink)
+		// A row with no icon keeps the space one would take, so the words
+		// of a list of options line up whether or not one of them has the
+		// tick that says it is chosen.
+		if it.icon != nil {
+			ui.Icon(c, it.icon).FontSize(19).TextColor(ink)
+		} else {
+			ui.Box(c).Size(19, 19)
+		}
 		label := it.text
 		if label == "" {
 			label = i18n.T(it.label)

@@ -14,6 +14,7 @@ import (
 // account that was here last, not one that has been proved.
 type Session struct {
 	Token    string `json:"token"`
+	UserID   string `json:"userId,omitempty"`
 	Email    string `json:"email,omitempty"`
 	Phone    string `json:"phone,omitempty"`
 	DeviceID string `json:"deviceId"`

@@ -35,6 +35,8 @@ func (a *App) resume() {
 			// The token has gone: the account is asked for again, with
 			// what is known about it already filled in.
 			a.update(func() {
+				a.me = nil
+				a.winLogin = true
 				a.busy = false
 				a.note = line{}
 				a.errText = say("login.expired")
@@ -46,6 +48,7 @@ func (a *App) resume() {
 				default:
 					a.loginMode = modeAccount
 				}
+				a.showWindow()
 			})
 			// A password that was kept signs in without asking, which is
 			// what asking to be remembered is for.

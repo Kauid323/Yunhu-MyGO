@@ -42,6 +42,7 @@ type palette struct {
 	// history as a mark rather than as a word. quoteBar is the line down the
 	// left of what a message answers, which has no ground of its own.
 	timePill, quoteBar ui.Color
+	emptySilhouette    ui.Color
 
 	// The popup menu is a step off the panels, with its own line.
 	menuBg, menuHover, menuLine ui.Color
@@ -128,6 +129,7 @@ var darkSkin = palette{
 
 	timePill: ui.Hex("#2c2c2c"),
 	quoteBar: ui.RGBA(255, 255, 255, 0.22),
+	emptySilhouette: ui.Hex("#2d2d2d"),
 
 	menuBg:        ui.Hex("#303030"),
 	menuHover:     ui.Hex("#404040"),
@@ -211,6 +213,7 @@ var lightSkin = palette{
 
 	timePill: ui.Hex("#e6e6e6"),
 	quoteBar: ui.RGBA(0, 0, 0, 0.20),
+	emptySilhouette: ui.Hex("#e5e5e5"),
 
 	menuBg:        ui.Hex("#ffffff"),
 	menuHover:     ui.Hex("#f0f0f0"),

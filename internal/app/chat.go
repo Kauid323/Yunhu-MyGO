@@ -18,10 +18,13 @@ func (a *App) open(conv yh.Conversation) {
 	if a.current == conv.ChatID {
 		// Picking the chat that is already open brings the window it is
 		// in forward, which is what the classic panel has to do: the
-		// chat is not in the panel.
+		// chat is not in the panel. In wide mode it deselects the chat
+		// and enters the clear screen state ("清屏").
 		if a.prefs.Mode == modeClassic {
 			a.openChatWindow()
+			return
 		}
+		a.clearChat()
 		return
 	}
 	a.current = conv.ChatID
@@ -41,6 +44,18 @@ func (a *App) open(conv yh.Conversation) {
 	a.hasNewer, a.loadingNewer, a.newerFrom = false, false, ""
 	a.loadedAt = 1 << 30
 	a.input = ""
+	// Who is in the group is the group's, not this chat's: another chat is
+	// asked for its own list, and the names picked in this one go with the
+	// text that was cleared.
+	a.members, a.mentionFind, a.mentionOpen, a.mentionGo = nil, "", false, false
+	a.named = nil
+	// A format was chosen for a text in the chat that was open, and that
+	// text is gone: the next one starts as words again.
+	a.sendType = yh.ContentText
+	a.formatMenu.open = false
+	// Messages picked in one chat are not picked in another: the bar that
+	// acts on them goes with the history they were chosen from.
+	a.picking, a.picked = false, nil
 	// A message of the chat that was open is not the message the pointer
 	// is on in this one, whatever ids they happen to share.
 	a.hoverID, a.hoverAt, a.stampID = "", time.Time{}, ""
@@ -67,6 +82,34 @@ func (a *App) open(conv yh.Conversation) {
 		// own, which follows the chat that is open.
 		a.openChatWindow()
 	}
+}
+
+// clearChat deselects the open conversation and returns to the empty screen.
+func (a *App) clearChat() {
+	a.current = ""
+	a.currentType = 0
+	a.group = nil
+	a.msgs = nil
+	a.loading = false
+	a.loadingMore = false
+	a.hasMore = false
+	a.hasNewer = false
+	a.loadingNewer = false
+	a.newerFrom = ""
+	a.input = ""
+	a.members = nil
+	a.mentionFind = ""
+	a.mentionOpen = false
+	a.mentionGo = false
+	a.named = nil
+	a.formatMenu.open = false
+	a.picking = false
+	a.picked = nil
+	a.hoverID, a.hoverAt, a.stampID = "", time.Time{}, ""
+	a.quote = nil
+	a.unreadFrom = 0
+	a.readFrom = 0
+	a.infoOpen = false
 }
 
 // loadMessages loads the latest messages of a chat, or the page a jump is
@@ -210,20 +253,24 @@ func (a *App) reload() {
 func (a *App) unread() bool { return a.unreadFrom < len(a.msgs) }
 
 // unreadBelow is how many messages the reader has not been past yet: what
-// the button over the list counts. It only goes down. Going back up
-// through the history does not count anything again, as coming into the
+// the pill over the foot of the list counts. It only goes down. Going back
+// up through the history does not count anything again, as coming into the
 // chat at all is reading what is there.
 func (a *App) unreadBelow() int {
+	if a.msgList.AtEnd() {
+		return 0
+	}
 	if n := len(a.msgs) - a.readFrom; n > 0 {
 		return n
 	}
 	return 0
 }
 
-// markRead records that the reader has been as far down as the top of the
-// view: what is above it is read, and the count on the button drops by as
-// much. At the end of the list everything is read, the newest message
-// being in view there.
+// markRead records how far down the history the reader has been: a row is
+// read once it has come into view, so the number on the pill over the foot
+// of the list drops by one for each message scrolled past. Counting by the
+// first visible row instead would hold the total until a whole screenful
+// had gone by, and leave messages that are plainly on screen unread.
 func (a *App) markRead(first, last int) {
 	if a.readFrom >= len(a.msgs) {
 		return
@@ -235,8 +282,8 @@ func (a *App) markRead(first, last int) {
 	if last < first {
 		return
 	}
-	if first > a.readFrom {
-		a.readFrom = first
+	if seen := last + 1; seen > a.readFrom {
+		a.readFrom = min(seen, len(a.msgs))
 	}
 }
 
@@ -248,6 +295,14 @@ func (a *App) send() {
 	}
 	a.input = ""
 	chatID, chatType := a.current, a.currentType
+	// What the text is written in is a choice for this message: it goes
+	// back to words once the text has gone, as the choice was for it.
+	kind := yh.SendKind(a.sendType)
+	a.sendType = yh.ContentText
+	// Who the text names goes with it: a name that was put in and then
+	// typed over is not one the message is about any more.
+	mentioned := a.namedIn(text)
+	a.forgetNamed(text)
 	// The message being answered, if there is one: it is sent with the
 	// text, and the field stops answering it once it has gone.
 	quoted := a.quote
@@ -255,7 +310,7 @@ func (a *App) send() {
 	pending := &yh.Message{
 		MsgID:       "local-" + yh.NewID(),
 		Sender:      yh.Sender{ChatID: a.me.ID, Name: a.me.Name, AvatarURL: a.me.AvatarURL, ChatType: yh.ChatUser},
-		ContentType: yh.ContentText,
+		ContentType: yh.SendKind(kind),
 		Content:     yh.Content{Text: text},
 		TimestampMS: uint64(time.Now().UnixMilli()),
 		Pending:     true,
@@ -266,15 +321,16 @@ func (a *App) send() {
 	a.msgs = append(a.msgs, pending)
 	a.trimMessages()
 	a.jumpToEnd = true
+	a.readFrom = len(a.msgs)
 
 	go func() {
 		var sent *yh.Message
 		var err error
 		if quoted != nil {
 			sent, err = a.client.SendQuoted(chatID, chatType, text, quoted.MsgID,
-				pending.Content.QuoteText)
+				pending.Content.QuoteText, mentioned, kind)
 		} else {
-			sent, err = a.client.SendText(chatID, chatType, text)
+			sent, err = a.client.SendText(chatID, chatType, text, mentioned, kind)
 		}
 		a.update(func() {
 			for i, m := range a.msgs {
@@ -293,18 +349,24 @@ func (a *App) send() {
 			}
 		})
 		if err == nil {
-			a.update(func() {
-				for i := range a.convs {
-					if a.convs[i].ChatID == chatID {
-						a.convs[i].Content = text
-						a.convs[i].SendTime = uint64(time.Now().Unix())
-						a.sortConversations()
-						return
-					}
-				}
-			})
+			a.update(func() { a.touchConv(chatID, text) })
 		}
 	}()
+}
+
+// touchConv puts what was just sent at the top of the conversation list,
+// where the client puts it: the chat that was written in is the newest one,
+// and its line under the name says what was sent.
+func (a *App) touchConv(chatID, preview string) {
+	for i := range a.convs {
+		if a.convs[i].ChatID != chatID {
+			continue
+		}
+		a.convs[i].Content = preview
+		a.convs[i].SendTime = uint64(time.Now().Unix())
+		a.sortConversations()
+		return
+	}
 }
 
 // jumpToMessage scrolls the history to a message the search found, which
@@ -528,4 +590,49 @@ func (a *App) trimMessages() {
 	// What was dropped is older than what is kept, so the pages before it
 	// are still there to be asked for.
 	a.hasMore = true
+}
+
+// sendFormatMenu is the menu that says what the next text is written in.
+// Words, markdown and markup are the three the route takes: the words of a
+// markdown message are drawn in the styles they ask for, and markup is read
+// for its words here. The choice is for one message — send() puts it back
+// to words as soon as the text has gone.
+func sendFormatMenu(a *App) menu {
+	return menu{
+		width: 150,
+		rows: []menuItem{
+			{icon: iconText, label: "format.text",
+				do: func() { a.sendType = yh.ContentText }},
+			{icon: iconMarkdown, label: "format.markdown",
+				do: func() { a.sendType = yh.ContentMarkdown }},
+			{icon: iconHTML, label: "format.html",
+				do: func() { a.sendType = yh.ContentHTML }},
+		},
+	}
+}
+
+// sendOptionsMenu is the menu behind the send button's arrow: which key
+// sends the text. The tick is the icon of the row that is chosen, and the
+// other row keeps the space so the two words line up as QQ has them. It is
+// made afresh each time the arrow is pressed, so the tick is always on the
+// key that is in force now.
+func sendOptionsMenu(a *App) menu {
+	choose := func(key string) func() {
+		return func() {
+			a.prefs.SendKey = key
+			a.savePrefs()
+		}
+	}
+	rows := []menuItem{
+		{label: "send.enter", do: choose("enter")},
+		{label: "send.ctrlEnter", do: choose("ctrlEnter")},
+	}
+	if a.prefs.SendKey == "ctrlEnter" {
+		rows[1].icon = iconCheck
+	} else {
+		rows[0].icon = iconCheck
+	}
+	// Wide enough for the longer of the two lines: a menu that clips
+	// "Ctrl + Enter" into an ellipsis is no way to choose a key.
+	return menu{width: 248, above: true, rows: rows}
 }

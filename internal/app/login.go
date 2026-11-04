@@ -141,6 +141,7 @@ func (a *App) openFeedback() { _ = mygo.Shell.OpenExternal(feedbackURL) }
 func (a *App) saveSession(u *yh.User) {
 	s := &yh.Session{
 		Token:    a.client.Token,
+		UserID:   u.ID,
 		Email:    u.Email,
 		Phone:    u.Phone,
 		DeviceID: a.client.DeviceID,
