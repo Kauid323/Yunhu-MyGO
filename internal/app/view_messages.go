@@ -320,7 +320,7 @@ func (a *App) jumpToUnread(c *ui.Context) {
 		box.Background(qq.menuHover)
 	}
 	box.Children(func() {
-		ui.Icon(c, iconChevron).FontSize(13).TextColor(qq.accent)
+		ui.Icon(c, iconChevronsDown).FontSize(13).TextColor(qq.accent)
 		text := i18n.Num(n)
 		if n > 99 {
 			text = "99+"

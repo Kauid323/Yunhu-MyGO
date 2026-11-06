@@ -75,6 +75,9 @@ var (
 	noticeKinds = []string{"windows", "qq", "off"}
 	trayKinds   = []string{"face", "box"}
 	muteWays    = []string{"notify", "quiet", "blocked"}
+	// shotScales is the resolutions a picture of messages is drawn at, from
+	// the one the history is read at to the one it is printed at.
+	shotScales = []string{"x1", "x2", "x3"}
 )
 
 // settings is the settings window: which page it is on, and which of that
@@ -93,6 +96,7 @@ type settings struct {
 	// open, which is a drop-down per row of a list.
 	openSend, openDbl, openNew, openCmd, openClose bool
 	openNotice, openTray, openMute                 bool
+	openShot                                       bool
 	openGroup                                      string
 }
 

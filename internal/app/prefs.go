@@ -29,6 +29,10 @@ type prefs struct {
 	Command   string `json:"command"`   // "expression" or "command"
 	Suggest   bool   `json:"suggest"`
 	Slash     bool   `json:"slash"`
+	// ShotDPI is how finely a picture of messages is drawn: "x1", "x2" or
+	// "x3" pixels to a DIP of the card. It is kept as a key for the same
+	// reason the drop-downs' values are, and "" is the default.
+	ShotDPI string `json:"shotDPI"`
 	// FilesDir and MsgDir are where the files that are received and the
 	// messages are kept, or "" for the folder the desktop gives the app.
 	FilesDir string `json:"filesDir"`

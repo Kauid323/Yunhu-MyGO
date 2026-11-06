@@ -25,6 +25,10 @@ func (a *App) generalPage(c *ui.Context, s *settings) {
 	a.chatCard(c, s)
 
 	gap(c, 24)
+	sectionTitle(c, "settings.shot")
+	a.shotCard(c, s)
+
+	gap(c, 24)
 	sectionTitle(c, "settings.files")
 	a.filesCard(c, s)
 
@@ -115,6 +119,15 @@ func (a *App) chatCard(c *ui.Context, s *settings) {
 			selectBox(c, &s.openCmd, &a.prefs.Command, commands,
 				func() { a.savePrefs() })
 		})
+	})
+}
+
+// shotCard is how a picture of messages is made: the card is laid out the
+// same whatever is picked here, and drawn as many times larger.
+func (a *App) shotCard(c *ui.Context, s *settings) {
+	settingCard(c, 16, 0, func() {
+		a.selectRow(c, false, "settings.shot.dpi", "settings.shot.dpiNote",
+			&s.openShot, &a.prefs.ShotDPI, shotScales)
 	})
 }
 

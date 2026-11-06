@@ -50,6 +50,7 @@ func (a *App) msgMenuRows(m *yh.Message) menu {
 	rows := []menuItem{
 		{icon: iconCopy, label: "msg.copy", do: func() { a.copyMessage(m) }},
 		{icon: iconForward, label: "msg.forward", do: func() { a.msgForwardRows(m) }},
+		{icon: iconSaveImage, label: "msg.makeImage", do: func() { a.messageImage([]*yh.Message{m}) }},
 		{icon: iconStar, label: "msg.favorite", dim: true},
 		{icon: iconCheckCircle, label: "msg.select", do: func() { a.startPicking(m.MsgID) }},
 		{icon: iconQuote, label: "msg.quote", do: func() { a.quote = m }},

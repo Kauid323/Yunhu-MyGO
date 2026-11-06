@@ -247,6 +247,11 @@ type App struct {
 	// messages chosen: the bar over the foot of the list acts on them.
 	picking bool
 	picked  map[string]bool
+	// shotBusy is whether a picture of messages is being made: a second
+	// press while the reader is still choosing where to put the first
+	// asks for nothing. The picture itself is drawn in a window of its
+	// own, which holds it rather than this one.
+	shotBusy bool
 	// space is what the app takes up on this machine, as the storage page
 	// reports it, and whether it is being measured.
 	space   space

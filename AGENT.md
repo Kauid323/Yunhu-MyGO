@@ -631,9 +631,68 @@ internal/app  ──►  internal/yh  ──►  net/http, coder/websocket
   行内 `pickBox` 圆圈 + `rowPress` 整行可点，`pickBar` 是**底部居中的紧凑胶囊**
   （外层 `ui.Row(...).Justify(ui.Center)` + 内层 `ui.Box`，别让条铺满整宽）。
   批量转发 / 删除 / 撤回复用单条那套；选模式下**不弹右键菜单**。
+  - **胶囊里必须 `Grow(1)`**：`ui.Box.Height(34)` 是 border-box，减掉上下 1px 边框
+    内容只有 32；里面的 Row 若只按内容高（26）就会贴顶，文字实测重心比胶囊中心
+    高 5px（上留白 9 / 下留白 14）。写 `Height(34)` 反而溢出 2px 又偏下 1.5px。
+    `ui.Row(c).Grow(1).AlignItems(ui.Center)` 才是填满内容盒，实测上下留白 12/11。
+  - **勾选框用 `AlignSelf(ui.Center)`**：行是 `AlignItems(ui.Start)`，不写就贴顶、
+    对齐到昵称而不是整条消息。
+- **动效**用 `ui.ElementTransition`（项目里已有 `menuArrives` / `selectArrives` 的写法），
+  别自己算时钟：它自动尊重系统的「减少动态效果」。
+  - 勾选：圆圈 `{Colors: true}` 让底色渐变，勾 `Enter: &ui.Motion{Scale: 0.35, Opacity: 0}`
+    弹进来（默认 transform 原点就是中心）；实测 45ms 时是半透明小勾，160ms 到位。
+  - 胶囊 `Enter/Exit` 要能播，**外层 Row 必须每帧都建**（`if !a.picking { return }`
+    放在 Row 内部）：父节点上一帧不存在时，子元素只会「出现」不会「升起」。
 - 表情栏 `ui.List` 必须给**固定 `Height`**：`MaxHeight` 不成视口、会把几百行全建出来。
   图片缓存按帧 LRU（`beginFrame` 每帧 +1，`used` 命中刷新），`fetchSem` 限并发 8，
   `imageBudget` 24MB；当前帧在用的图不淘汰，否则刚画就被逐出、每帧重新拉取。
+
+### 15.1 消息截图（`msgshot.go`）
+
+右键「生成图片」或选模式胶囊的「存图」，把选中的消息画成一张 PNG。**画的是同一套
+`bubble` / markdown / `messageAvatar`**，所以引用、图片、贴纸、卡片和聊天记录里长得
+一模一样——别另写一套绘制，一写就会走样。入口 `a.messageImage(msgs)`：先弹
+`mygo.Dialog.Save`（goroutine 里，窗口和 `i18n.T` 的文案要在进去之前取好），再
+`a.shotPNG(s)` 画、`os.WriteFile` 落盘，`a.shotBusy` 防重复点。
+
+卡片结构：标题 + 时间 → 1px 分隔线 → 每条消息一行 → 1px 分隔线 → 居中「由 mygo湖 生成」。
+底色 `shotEmpty = ui.RGB(1,0,1)`（卡片永远不会画这个颜色），画完按行比对把下方底色裁掉。
+
+**用 `ui.Render(view, w, h, scale)`，不要用窗口 `CapturePage()`。** 它是纯内存的一帧，
+`scale` 是「每 DIP 几个像素」，文字按目标尺寸**重新栅格化**。设置页的分辨率
+（`prefs.ShotDPI`：`x1`/`x2`/`x3`，默认 `x2`）就是它的 `scale`。三个理由：
+
+- **窗口 `Scale(n, n)` 是假的**。`ui.Element.Scale` 是在栅格化之后做变换，等于把 1× 的
+  位图放大，实测文字**糊成一团**（用户的原话：「这么糊，垃圾」）。要清晰只能让渲染器
+  一开始就按大尺寸画，也就是 `ui.Render` 的 `scale`。`TransformOrigin` 也救不了。
+- **窗口高度被桌面截断**：要 1600 / 4800 / 14400 都只拿到 **460×1100**。
+  `ui.Render` 没有这个限制，高度自己给。
+- **隐藏窗口只画一帧**：`Hidden: true` 的窗口 `Invalidate()` 不再出新帧，
+  `CapturePage()` 两次拿到**逐字节相同**的图（`take1 348 frames 1` / `take2 348
+  frames 1` / `same pixels: true`）。`ui.Render` 每次都是新的一帧，没有这个问题。
+
+卡片再高也要**切片画**，但理由变成省内存而不是绕截断：一片 `shotRoom=900` DIP，
+每片把卡片 `Translate(0, -up)` 抬起来，裁掉底部底色后
+`up += (end+1) * shotW / b.Dx()`（按实际像素宽换算回 DIP，`scale` 不是 1 也对），
+直到某片末行**不是**片子的最后一行——那说明卡片到头了。每片当场编码成 PNG 存
+`shotPart`，拼的时候再逐片解码画进大图，**同一时刻只有一片是完整的位图**
+（3× 时一片就 15MB，全留着会到上百 MB）。
+
+`ui.Render` 在**主线程**上跑（`a.onMain`）：`qq` 和 `i18n` 都是包级状态，和窗口的帧
+同时画会互相读到对方的皮肤和语言。所以 `shotWin` 里存下 `dark`（取自 `qq.dark`）和
+`lang`（`i18n.Lang()`），画的时候 `qq = skin(s.dark)`、`i18n.Set(s.lang)`——
+`ui.Render` 的 headless context 既没有桌面外观也不一定给对语言。
+
+图片要等：切片第一遍画只是**发起**图片请求，`shotSettle()` 等 `a.images.busy()` 变空
+（先睡 80ms，因为发起是画帧时做的，紧接着查会查不到），**再画一遍**才拿到真图而不是
+占位框。
+
+**`Bounds()` 出了帧就读不了**（`ui/frame.go:100` panic），卡片高度只能从画出来的
+像素里量，不能从布局里问。
+
+设置项在通用页的「消息图片」卡片里：`selectRow` + `shotScales`，值是
+`settings.value.x1/x2/x3`，同时写清像素宽（460 / 920 / 1380），因为「2×」比「920 像素」
+难懂。
 
 ## 16. Linux 交叉编译
 

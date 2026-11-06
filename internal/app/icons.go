@@ -73,18 +73,21 @@ var (
 	iconEmoji    = icon(`<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5h.01M15 9.5h.01"/>`)
 	iconScissors = icon(`<circle cx="6.5" cy="6.5" r="2.5"/><circle cx="6.5" cy="17.5" r="2.5"/><path d="M20 4L8.5 15.5M14.5 14.5L20 20M8.5 8.5L12 12"/>`)
 	iconImage    = icon(`<rect x="3" y="4.5" width="18" height="15" rx="2.4"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M21 15.5l-4.6-4.6L6 21"/>`)
-	iconMic      = icon(`<rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21M8.5 21h7"/>`)
-	iconAt       = icon(`<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 5.2 2A9 9 0 1 0 18 19.7"/>`)
-	iconHistory  = icon(`<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3 4v4.5h4.5"/><path d="M12 8v4.5l3 1.8"/>`)
-	iconChevron  = icon(`<path d="M6 9l6 6 6-6"/>`)
+	// iconSaveImage is a message kept as a picture: a photograph, and the
+	// arrow that puts it down beside it.
+	iconSaveImage = icon(`<rect x="2.5" y="4" width="12.5" height="10.5" rx="2"/><circle cx="6.4" cy="7.8" r="1.2"/><path d="M15 12.5l-3.6-3.6L4 16"/><path d="M18.5 8.5v11"/><path d="M15.5 16.5l3 3 3-3"/>`)
+	iconMic       = icon(`<rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21M8.5 21h7"/>`)
+	iconAt        = icon(`<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 5.2 2A9 9 0 1 0 18 19.7"/>`)
+	iconHistory   = icon(`<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3 4v4.5h4.5"/><path d="M12 8v4.5l3 1.8"/>`)
+	iconChevron   = icon(`<path d="M6 9l6 6 6-6"/>`)
 	// iconChevronUp is the send button's arrow while its menu is open:
 	// the arrow turns to point at the menu it opened.
 	iconChevronUp = icon(`<path d="M6 15l6-6 6 6"/>`)
 	// iconChevronsDown is the pair of arrows over the foot of the history:
 	// there are messages further down that have not been seen yet.
 	iconChevronsDown = icon(`<path d="M5 6l7 6 7-6"/><path d="M5 12l7 6 7-6"/>`)
-	iconSend      = icon(`<path d="M21 3L10.5 13.5M21 3l-6.8 18-3.7-7.5L3 9.8z"/>`)
-	iconLogout    = icon(`<path d="M9 21H5.5A1.5 1.5 0 0 1 4 19.5v-15A1.5 1.5 0 0 1 5.5 3H9"/><path d="M16 16.5l4.5-4.5L16 7.5"/><path d="M20.5 12H9"/>`)
+	iconSend         = icon(`<path d="M21 3L10.5 13.5M21 3l-6.8 18-3.7-7.5L3 9.8z"/>`)
+	iconLogout       = icon(`<path d="M9 21H5.5A1.5 1.5 0 0 1 4 19.5v-15A1.5 1.5 0 0 1 5.5 3H9"/><path d="M16 16.5l4.5-4.5L16 7.5"/><path d="M20.5 12H9"/>`)
 )
 
 // iconFill parses the same shapes as icon, filled rather than stroked: what

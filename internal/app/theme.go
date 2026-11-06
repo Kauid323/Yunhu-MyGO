@@ -127,8 +127,8 @@ var darkSkin = palette{
 	mdCode:  ui.RGBA(255, 255, 255, 0.10),
 	mdRule:  ui.RGBA(255, 255, 255, 0.16),
 
-	timePill: ui.Hex("#2c2c2c"),
-	quoteBar: ui.RGBA(255, 255, 255, 0.22),
+	timePill:        ui.Hex("#2c2c2c"),
+	quoteBar:        ui.RGBA(255, 255, 255, 0.22),
 	emptySilhouette: ui.Hex("#2d2d2d"),
 
 	menuBg:        ui.Hex("#303030"),
@@ -211,8 +211,8 @@ var lightSkin = palette{
 	mdCode:  ui.RGBA(0, 0, 0, 0.06),
 	mdRule:  ui.RGBA(0, 0, 0, 0.14),
 
-	timePill: ui.Hex("#e6e6e6"),
-	quoteBar: ui.RGBA(0, 0, 0, 0.20),
+	timePill:        ui.Hex("#e6e6e6"),
+	quoteBar:        ui.RGBA(0, 0, 0, 0.20),
 	emptySilhouette: ui.Hex("#e5e5e5"),
 
 	menuBg:        ui.Hex("#ffffff"),

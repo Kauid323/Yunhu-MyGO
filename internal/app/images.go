@@ -70,6 +70,15 @@ func (c *imageCache) bytes() int64 {
 	return int64(c.total)
 }
 
+// busy reports whether pictures are still on their way: a card drawn in a
+// window of its own waits for them before it is taken, as nothing draws
+// again in a window that is never shown.
+func (c *imageCache) busy() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.loading) > 0
+}
+
 // beginFrame starts a frame: from here until the next one, every picture
 // asked for is one the frame is drawing, and is kept while it is.
 func (c *imageCache) beginFrame() {
